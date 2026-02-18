@@ -2,8 +2,11 @@
 .Rdata
 .RData
 .RdataTmp
+.RDataTmp
 .RdataTmp1
+.RDataTmp1
 .RdataTmp2
+.RDataTmp2
 .Rhistory
 eddy_covariance_fluxdata/eddycovariance_fieldshapes/
 additional_data/
