@@ -1,0 +1,249 @@
+library(tidyverse)
+library(readxl)
+library(purrr)
+library(lubridate)
+library(hms)
+
+# ============================================================================
+# 1. upload 2020 chamber-based data from project folder:
+# ============================================================================
+# data are in units micromol/m2/sec (µmol m\^-2 s\^-1) and were calculated in Matlab.
+
+flux_2020 <- read_xlsx("2020 FLUX  data summary with monthly means.xlsx", sheet = "all")
+flux_2020 <- flux_2020 %>% select(1:12)
+
+# code-friendly column headers:
+colnames <- c("management", "collar", "light_dark", "date", "starttime", "endtime", "airtemp_C", "soilmois_percent", "spad_leafchloro", "NDVI",
+              "co2flux_umol_m2_sec", "ch4flux_umol_m2_sec")
+colnames(flux_2020) <- colnames
+
+flux_2020 <- flux_2020 %>% 
+  filter(!management %in% c("EF03", "CS04")) %>% 
+  mutate(obs_length = endtime - starttime) %>% 
+  mutate(month = format(date, "%m")) %>% 
+  mutate(year = format(date, "%Y")) %>% 
+  mutate(hour = hour(ceiling_date(starttime, "hour"))) %>% 
+  # Change management to 'organic' and 'conventional'
+  mutate(management = case_when(
+    management == "EF01" ~ "organic",
+    management == "EF02" ~ "conventional"
+  )) %>% 
+  # count how many sites per day were conducted and identify for each day:
+  group_by(collar, management, date) %>%  
+  mutate(visit_id = row_number()) %>% 
+  ungroup() %>% 
+  # filter out outliers using IQR method -- robust to skewed distributions
+  group_by(collar, management, date, visit_id) %>% 
+  mutate(
+    Q1 = quantile(co2flux_umol_m2_sec, 0.25, na.rm = TRUE),
+    Q3 = quantile(co2flux_umol_m2_sec, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    is_outlier = co2flux_umol_m2_sec < (Q1 - 1.5 * IQR) | 
+      co2flux_umol_m2_sec > (Q3 + 1.5 * IQR)) %>% 
+  ungroup() %>% 
+  # remove unnecessary columns:
+  select(!c(starttime, endtime, Q1, Q3, IQR, is_outlier, 
+            # taking out methane for now:
+            ch4flux_umol_m2_sec)) 
+# ============================================================================
+# 2. calculate a daily average for each collar (multiple visits per day):
+# ============================================================================
+
+flux_2020_collardaily <- flux_2020 %>% 
+  # take hourly collar averages
+  arrange(management, date, collar, light_dark) %>% 
+  group_by(management, collar, date, light_dark) %>% 
+  summarize(
+    # keep constants:
+    year = first(year),
+    month = first(month),
+    hour = first(hour),
+    
+    # Measurements with proper SE
+    n_obs = sum(!is.na(co2flux_umol_m2_sec)),
+    co2_umol_m2_sec = mean(co2flux_umol_m2_sec, na.rm = TRUE),
+    flux_se = 
+      if_else(n_obs > 1,
+                      sd(co2flux_umol_m2_sec, na.rm = TRUE)/sqrt(n_obs),
+                      NA_real_),
+    
+    # Environmental variables
+    airtemp_C = mean(airtemp_C, na.rm = TRUE),
+    soilmois_percent = mean(soilmois_percent, na.rm = TRUE),
+    spad_leafchloro = mean(spad_leafchloro, na.rm = TRUE),
+    NDVI = mean(NDVI, na.rm = TRUE)
+  )
+# ============================================================================
+# 3. split into dark (Rs) and light (NEE):
+# ============================================================================
+
+# split into dark and light (e.g., soil flux versus NEE):
+flux_2020_Rs <- flux_2020_collardaily %>%
+  filter(light_dark == "dark") %>% 
+  rename(Rs_umolm2sec = co2_umol_m2_sec,
+         Rs_se = flux_se) %>% 
+  select(!c(airtemp_C, soilmois_percent, spad_leafchloro, NDVI, light_dark, n_obs))
+
+flux_2020_NEE <- flux_2020_collardaily %>%
+  filter(light_dark == "light") %>% 
+  rename(NEE_umolm2sec = co2_umol_m2_sec,
+         NEE_se = flux_se) %>% 
+  select(!c(light_dark, month, year, n_obs))
+
+# ============================================================================
+# 4. merge into one 2020 dataset with columns for Rs, NEE:
+# ============================================================================
+flux_2020_chamberdat <- flux_2020_Rs %>% 
+  left_join(flux_2020_NEE,
+            by = join_by(management, date, hour, collar))
+
+# ============================================================================
+# 5. Repeat with 2019 data:
+# ============================================================================
+
+flux_2019 <- read_xlsx("2019 FLUX data summary.xlsx", sheet = "all")
+flux_2019 <- flux_2019 %>% select("Site", "Ring #", "Light/Dark", "Date", "Start time", "End time",
+                                  "Air temp C", "Soil mosture %", "Spad (0-100)", "G.S. (NDVI 0.00-.99)",
+                                  "CO2( mmol/m2/s)", "CH4 (mmol/m2/s)")
+
+# code-friendly column headers:
+colnames <- c("management", "collar", "light_dark", "date", "starttime", "endtime", "airtemp_C", "soilmois_percent", "spad_leafchloro", "NDVI",
+              "co2flux_umol_m2_sec", "ch4flux_umol_m2_sec")
+colnames(flux_2019) <- colnames
+
+flux_2019 <- flux_2019 %>% 
+  filter(!management %in% c("EF03", "CS04")) %>% 
+  mutate(obs_length = endtime - starttime) %>% 
+  mutate(month = format(date, "%m")) %>% 
+  mutate(year = format(date, "%Y")) %>% 
+  mutate(hour = hour(ceiling_date(starttime, "hour"))) %>% 
+  # Change management to 'organic' and 'conventional'
+  mutate(management = case_when(
+    management == "EF01" ~ "organic",
+    management == "EF02" ~ "conventional"
+  )) %>%
+  # count how many sites per day were conducted and identify for each day:
+  group_by(collar, management, date) %>%  
+  mutate(visit_id = row_number()) %>% 
+  ungroup() %>% 
+  # filter out outliers using IQR method -- robust to skewed distributions
+  group_by(collar, management, date, visit_id) %>% 
+  mutate(
+    Q1 = quantile(co2flux_umol_m2_sec, 0.25, na.rm = TRUE),
+    Q3 = quantile(co2flux_umol_m2_sec, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    is_outlier = co2flux_umol_m2_sec < (Q1 - 1.5 * IQR) | 
+      co2flux_umol_m2_sec > (Q3 + 1.5 * IQR)) %>% 
+  ungroup() %>% 
+  # remove unnecessary columns:
+  select(!c(starttime, endtime, Q1, Q3, IQR, is_outlier, 
+            # taking out methane for now:
+            ch4flux_umol_m2_sec)) 
+
+# daily average per collar:
+flux_2019_collardaily <- flux_2019 %>% 
+  # take hourly collar averages
+  arrange(management, date, collar, light_dark) %>% 
+  group_by(management, collar, date, light_dark) %>% 
+  summarize(
+    # keep constants:
+    year = first(year),
+    month = first(month),
+    hour = first(hour),
+    
+    # Measurements with proper SE
+    n_obs = sum(!is.na(co2flux_umol_m2_sec)),
+    co2_umol_m2_sec = mean(co2flux_umol_m2_sec, na.rm = TRUE),
+    flux_se = 
+      if_else(n_obs > 1,
+              sd(co2flux_umol_m2_sec, na.rm = TRUE)/sqrt(n_obs),
+              NA_real_),
+    
+    # Environmental variables
+    airtemp_C = mean(airtemp_C, na.rm = TRUE),
+    soilmois_percent = mean(soilmois_percent, na.rm = TRUE),
+    spad_leafchloro = mean(spad_leafchloro, na.rm = TRUE),
+    NDVI = mean(NDVI, na.rm = TRUE)) %>% 
+  ungroup()
+
+# split into dark and light (e.g., soil flux versus NEE):
+flux_2019_Rs <- flux_2019_collardaily %>%
+  filter(light_dark == "dark") %>% 
+  rename(Rs_umolm2sec = co2_umol_m2_sec,
+         Rs_se = flux_se) %>% 
+  select(!c(airtemp_C, soilmois_percent, spad_leafchloro, NDVI, light_dark, n_obs))
+
+flux_2019_NEE <- flux_2019_collardaily %>%
+  filter(light_dark == "light") %>% 
+  rename(NEE_umolm2sec = co2_umol_m2_sec,
+         NEE_se = flux_se) %>% 
+  select(!c(light_dark, month, year, n_obs))
+
+# merge:
+flux_2019_chamberdat <- flux_2019_Rs %>% 
+  left_join(flux_2019_NEE,
+            by = join_by(management, date, hour, collar))
+
+# ============================================================================
+# 6. merge 2019 and 2020 data:
+# ============================================================================
+
+chamber_daily_collar <- rbind(flux_2019_chamberdat, flux_2020_chamberdat)
+# clean up NaN values:
+chamber_daily_collar <- chamber_daily_collar %>% 
+  ungroup() %>% 
+  mutate(spad_leafchloro = na_if(spad_leafchloro, NaN),
+         NDVI = na_if(NDVI, NaN))
+
+# ============================================================================
+# 7. calculate site-level daily averages:
+# ============================================================================
+
+chamber_daily_site <- chamber_daily_collar %>% 
+  group_by(management, date) %>% 
+  summarize(
+    # Keep constants (first() is more efficient than repeating)
+    year = first(year), 
+    month = first(month),
+    Rs_umolm2sec_mean = mean(Rs_umolm2sec, na.rm = TRUE),
+    Rs_daily_se = sd(Rs_umolm2sec, na.rm = TRUE)/sqrt(sum(!is.na(Rs_umolm2sec))),
+    NEE_umolm2sec_mean = mean(NEE_umolm2sec, na.rm = TRUE),
+    NEE_daily_se = sd(NEE_umolm2sec, na.rm = TRUE)/sqrt(sum(!is.na(NEE_umolm2sec))),
+    
+    n_collars = sum(!is.na(Rs_umolm2sec)),
+    
+    # Environmental variables
+    airtempC_mean = mean(airtemp_C, na.rm = TRUE),
+    soilm_perc_mean = mean(soilmois_percent, na.rm = TRUE),
+    spad_mean = mean(spad_leafchloro, na.rm = TRUE),
+    NDVI_mean = mean(NDVI, na.rm = TRUE)) %>% 
+  ungroup()
+
+# ============================================================================
+# 8. calculate site-level weekly averages:
+# ============================================================================
+
+chamber_weekly_site <- chamber_daily_collar %>%
+  group_by(management, week = floor_date(date, "week")) %>%
+  summarize(
+    # Keep constants (first() is more efficient than repeating)
+    year = first(year), 
+    month = first(month),
+    Rs_umolm2sec_mean = mean(Rs_umolm2sec, na.rm = TRUE),
+    Rs_daily_se = sd(Rs_umolm2sec, na.rm = TRUE)/sqrt(sum(!is.na(Rs_umolm2sec))),
+    NEE_umolm2sec_mean = mean(NEE_umolm2sec, na.rm = TRUE),
+    NEE_daily_se = sd(NEE_umolm2sec, na.rm = TRUE)/sqrt(sum(!is.na(NEE_umolm2sec))),
+    
+    # Environmental variables
+    airtempC_mean = mean(airtemp_C, na.rm = TRUE),
+    soilm_perc_mean = mean(soilmois_percent, na.rm = TRUE),
+    spad_mean = mean(spad_leafchloro, na.rm = TRUE),
+    NDVI_mean = mean(NDVI, na.rm = TRUE)) %>% 
+  ungroup()
+
+# ============================================================================
+# 9. remove excess files from global environment:
+# ============================================================================
+rm(flux_2019, flux_2019_chamberdat, flux_2019_collardaily, flux_2019_NEE,
+     flux_2019_Rs, flux_2020, flux_2020_chamberdat, flux_2020_collardaily,
+     flux_2020_NEE, flux_2020_Rs)

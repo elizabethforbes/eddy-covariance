@@ -1,0 +1,11 @@
+date,event,details,amount,unit,field,contains s2,site
+3/20/2018,fertilize,Potash,60,lbs/acre,,,conventional
+5/1/2018,till,IH 875 disc ripper,9,inch,,,conventional
+5/1/2018,till,Turbo till ,2,inch,,,conventional
+5/10/2018,plant,corn,32000,sds/acre,Dekalb 49-94,,conventional
+5/12/2018,herbicide,Instigate,6,oz/acre,,,conventional
+5/12/2018,herbicide,DuPont Cinch,48,oz/acre,,,conventional
+6/27/2018,fertilize,UAN,180,lbs/acre,,,conventional
+6/28/2018,fertilize,Phosphorus,20,lbs/acre,,,conventional
+10/4/2018,harvest,Corn,194,bu/acre,,,conventional
+4/4/2019,fertilize,Lime,2,tons/acre,,,conventional

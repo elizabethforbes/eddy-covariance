@@ -1,0 +1,37 @@
+date,event,details,amount,unit,field,contains s2,site
+3/29/2020,till,brillion folding pulvi mulcher,2,inch,,,organic
+3/27/2020,till,Landoll,,,,,organic
+5/9/2019,till,12 Row Rotary Hoe,1,inch,"1.00 """,,organic
+5/8/2019,till,Krause field cultivator,,,,,organic
+6/14/2018,till,12 Row Crop Cultivator,,,,,organic
+5/27/2018,till,12 Row Rotary Hoe,,,,,organic
+5/15/2018,till,Krause field cultivator,,,,,organic
+5/8/2018,till,10-bottom Kverneland Plow,10,inch,"10.00 """,,organic
+11/15/2017,plant,rye,,,,,organic
+5/1/2018,plant,cover,,,,,organic
+5/20/2018,plant,corn,,,,,organic
+5/27/2018,plant,corn,,,,,organic
+5/30/2018,plant,corn,,,,,organic
+10/27/2018,plant,rye,,,,,organic
+5/9/2019,plant,soy,,,,,organic
+11/11/2019,plant,rye,,,,,organic
+3/29/2020,plant,barley,,,,,organic
+4/17/2020,plant,cover,,,,,organic
+9/16/2020,plant,grass,,,,,organic
+5/1/2018,harvest,rye,,,,,organic
+5/20/2018,harvest,cover,,,,,organic
+5/27/2018,harvest,corn,,,,,organic
+5/30/2018,harvest,corn,,,,,organic
+10/27/2018,harvest,corn,,,,,organic
+5/9/2019,harvest,rye,,,,,organic
+11/11/2019,harvest,soy,,,,,organic
+3/29/2020,harvest,rye,,,,,organic
+4/17/2020,harvest,barley,,,,,organic
+9/16/2020,harvest,cover,,,,,organic
+12/31/2021,harvest,grass,,,,,organic
+10/20/2017,fertilize,Composted Poultry Litter,1.5,ton/acre,,,organic
+12/15/2017,fertilize,High Calcium Limestone (22%),1,ton/acre,,,organic
+5/2/2018,fertilize,Composted poultry litter,1,ton/acre,,,organic
+5/20/2018,fertilize,"Compost tea starter: barrel compost, compost tea catalyst, fish emulsion, humates, SeaCrop, Stress-X, Molasses",15,gal/acre,,,organic
+,,,,,,,
+,,,,,,,

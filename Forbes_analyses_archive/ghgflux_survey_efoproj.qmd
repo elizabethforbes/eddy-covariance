@@ -1,0 +1,1837 @@
+---
+title: "ghgflux_survey_efoproject"
+format: pdf
+editor: visual
+execute: 
+  echo: false
+  warning: false
+---
+
+# EFO project: eddy covariance across field and management types
+
+This script explores, visualizes, and analyzes hand-collected soil GHG flux data from the bases of three eddy covariance towers: one at a pasture, one at a conventional grain field, and one at an organic/regenerative grain field.
+
+## Packages, data upload
+
+```{r packages}
+library(tidyverse)
+library(readxl)
+library(readr)
+library(ggpubr)
+library(naniar)
+library(here)
+library(sf) # for reading shape files
+library(purrr)
+library(lubridate)
+library(hms)
+library(ineq) # for Lc function: lorenz curve
+library(ggstance)
+```
+
+## Chamber-based flux data
+
+Upload data: summary flux data from Kyle's drive, HC server, year 2020 EFO1: ORGANIC EFO2: CONVENTIONAL EFO3: DAIRY
+
+data are in units micromol/m2/sec (µmol m\^-2 s\^-1) and were calculated in Matlab.
+
+```{r upload_clean_summarydata}
+flux_2020 <- read_xlsx("2020 FLUX  data summary with monthly means.xlsx", sheet = "all")
+flux_2020 <- flux_2020 %>% select(1:12)
+
+# code-friendly column headers:
+colnames <- c("site", "collar", "light_dark", "date", "starttime", "endtime", "airtemp_C", "soilmois_percent", "spad_leafchloro", "NDVI",
+              "co2flux_mmol_m2_sec", "ch4flux_mmol_m2_sec")
+colnames(flux_2020) <- colnames
+
+# add 'obs_length' column by subtracting the start time from the end time for each observation:
+flux_2020$obs_length <- flux_2020$endtime - flux_2020$starttime
+# add month:
+flux_2020$month <- format(flux_2020$date, "%m")
+# add year:
+flux_2020$year <- format(flux_2020$date, "%Y")
+
+
+# split into dark and light (e.g., soil flux versus NEE):
+flux_2020_Rs <- flux_2020 %>%
+  filter(light_dark == "dark")
+flux_2020_NEE <- flux_2020 %>%
+  filter(light_dark == "light")
+```
+
+2019 data, found elsewhere on the server:
+
+```{r 2019}
+flux_2019 <- read_xlsx("2019 FLUX data summary.xlsx", sheet = "all")
+flux_2019 <- flux_2019 %>% select("Site", "Ring #", "Light/Dark", "Date", "Start time", "End time",
+                                  "Air temp C", "Soil mosture %", "Spad (0-100)", "G.S. (NDVI 0.00-.99)",
+                                  "CO2( mmol/m2/s)", "CH4 (mmol/m2/s)")
+
+# code-friendly column headers:
+colnames <- c("site", "collar", "light_dark", "date", "starttime", "endtime", "airtemp_C", "soilmois_percent", "spad_leafchloro", "NDVI",
+              "co2flux_mmol_m2_sec", "ch4flux_mmol_m2_sec")
+colnames(flux_2019) <- colnames
+
+# add 'obs_length' column by subtracting the start time from the end time for each observation:
+flux_2019$obs_length <- flux_2019$endtime - flux_2019$starttime
+# add month:
+flux_2019$month <- format(flux_2019$date, "%m")
+# add year:
+flux_2019$year <- format(flux_2019$date, "%Y")
+
+# split into dark and light (e.g., soil flux versus NEE):
+flux_2019_Rs <- flux_2019 %>%
+  filter(light_dark == "dark")
+flux_2019_NEE <- flux_2019 %>%
+  filter(light_dark == "light")
+
+```
+
+merge 2020, 2019 data:
+
+```{r}
+flux_19_20 <- rbind(flux_2019, flux_2020)
+# split into light and dark
+flux_19_20_Rs <- flux_19_20 %>% 
+  filter(light_dark == "dark") %>% 
+  # add "hour" column
+  mutate(hour = hour(starttime)) %>% 
+  # add hourminsec column (time)
+  mutate(time = as_hms(starttime)) %>% 
+  # add datettime with correct date
+  mutate(datetime = as.POSIXct(paste(date, time), c("%Y-%m-%d %H:%M:%S"), tz = "EST"))
+
+flux_19_20_NEE <- flux_19_20 %>% 
+  filter(light_dark == "light") %>% 
+# add "hour" column:
+  mutate(hour = hour(starttime)) %>% 
+  # add hourminsec column (time)
+  mutate(time = as_hms(starttime)) %>% 
+  # add datettime with correct date
+  mutate(datetime = as.POSIXct(paste(date, time), c("%Y-%m-%d %H:%M:%S"), tz = "EST"))
+```
+
+### Calculate collar-daily, site-daily, and site weekly/monthly averages:
+
+#### soil Rs:
+
+```{r}
+
+# filter out outliers using IQR method:
+flux_cleaned <- flux_19_20_Rs %>% # More robust to skewed distributions
+  filter(co2flux_mmol_m2_sec < 1000) %>% 
+  filter(site != "CS04") %>% 
+  group_by(collar, site, date) %>%  
+  mutate(visit_id = row_number()) %>% 
+  ungroup() %>% 
+  group_by(collar, site, date, visit_id) %>% 
+  mutate(
+  Q1 = quantile(co2flux_mmol_m2_sec, 0.25, na.rm = TRUE),
+  Q3 = quantile(co2flux_mmol_m2_sec, 0.75, na.rm = TRUE),
+  IQR = Q3 - Q1,
+  is_outlier = co2flux_mmol_m2_sec < (Q1 - 1.5 * IQR) | 
+               co2flux_mmol_m2_sec > (Q3 + 1.5 * IQR)
+) # removed five observations (1711->1706) then removed all for CS04 (total of 1338 obs across three towers)
+
+# average within collars for each site visit, then across collars for each site per day:
+Rs_collar_daily <- flux_cleaned %>% 
+  group_by(collar, date) %>% 
+  summarize(
+    # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    datetime = first(datetime),
+    hour = hour(first(datetime)), # calculate from existing datetime
+    
+    # Measurements with proper SE
+    n_obs = sum(!is.na(co2flux_mmol_m2_sec)),
+    CO2_Rs_mean = mean(co2flux_mmol_m2_sec, na.rm = TRUE),
+    CO2_Rs_se = if_else(n_obs > 1, 
+                     sd(co2flux_mmol_m2_sec, na.rm = TRUE)/sqrt(n_obs), 
+                     NA_real_),
+    
+    CH4_Rs_mean = mean(ch4flux_mmol_m2_sec, na.rm = TRUE),
+    CH4_Rs_se = if_else(sum(!is.na(ch4flux_mmol_m2_sec)) > 1,
+                     sd(ch4flux_mmol_m2_sec, na.rm = TRUE)/sqrt(sum(!is.na(ch4flux_mmol_m2_sec))),
+                     NA_real_),
+    
+    # Environmental variables
+    airtemp_mean = mean(airtemp_C, na.rm = TRUE)
+  )
+
+Rs_site_daily <- Rs_collar_daily %>%
+  group_by(date) %>%
+  summarize(
+     # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    CO2_Rs_daily_mean = mean(CO2_Rs_mean, na.rm = TRUE),
+    CO2_Rs_daily_se = sd(CO2_Rs_mean, na.rm = TRUE)/sqrt(sum(!is.na(CO2_Rs_mean))),
+    CH4_Rs_daily_mean = mean(CH4_Rs_mean, na.rm = TRUE),
+    CH4_Rs_daily_se = sd(CH4_Rs_mean, na.rm = TRUE)/sqrt(sum(!is.na(CH4_Rs_mean))),
+    
+    n_collars = sum(!is.na(CO2_Rs_mean)),
+                    
+                        # Environmental variables
+    airtemp_mean = mean(airtemp_mean, na.rm = TRUE)
+  )
+
+Rs_site_weekly <- Rs_site_daily %>%
+  group_by(week = floor_date(date, "week")) %>%
+  summarize(
+         # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    CO2_Rs_weekly_mean = mean(CO2_Rs_daily_mean, na.rm = TRUE),
+    # SE of daily means:
+    CO2_Rs_weekly_se = sd(CO2_Rs_daily_mean, na.rm = TRUE)/sqrt(sum(!is.na(CO2_Rs_daily_mean))),
+    CH4_Rs_weekly_mean = mean(CH4_Rs_daily_mean, na.rm = TRUE),
+    CH4_Rs_weekly_se = sd(CH4_Rs_daily_mean, na.rm = TRUE)/sqrt(sum(!is.na(CH4_Rs_daily_mean))),
+    
+                        # Environmental variables
+    airtemp_mean = mean(airtemp_mean, na.rm = TRUE)
+  )
+
+```
+
+#### NEE:
+
+```{r}
+# filter out outliers using IQR method:
+NEE_cleaned <- flux_19_20_NEE %>% 
+  filter(co2flux_mmol_m2_sec > -1000) %>% 
+  filter(site != "CS04") %>% 
+  group_by(collar, site, date) %>%
+  mutate(visit_id = row_number()) %>% 
+  ungroup() %>% 
+  group_by(collar, site, date, visit_id) %>% 
+  mutate(
+  Q1 = quantile(co2flux_mmol_m2_sec, 0.25, na.rm = TRUE),
+  Q3 = quantile(co2flux_mmol_m2_sec, 0.75, na.rm = TRUE),
+  IQR = Q3 - Q1,
+  is_outlier = co2flux_mmol_m2_sec < (Q1 - 1.5 * IQR) | 
+               co2flux_mmol_m2_sec > (Q3 + 1.5 * IQR)
+) # (total of 1342 obs across three towers)
+
+# average within collars for each site visit, then across collars for each site per day:
+NEE_collar_daily <- NEE_cleaned %>% 
+  group_by(collar, date) %>% 
+  summarize(
+    # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    datetime = mean(datetime, na.rm = TRUE),
+    hour = hour(first(datetime)), # calculate from existing datetime
+    
+    # Measurements with proper SE
+    n_obs = sum(!is.na(co2flux_mmol_m2_sec)),
+    CO2_NEE_mean = mean(co2flux_mmol_m2_sec, na.rm = TRUE),
+    CO2_NEE_se = if_else(n_obs > 1, 
+                     sd(co2flux_mmol_m2_sec, na.rm = TRUE)/sqrt(n_obs), 
+                     NA_real_),
+    
+    CH4_NEE_mean = mean(ch4flux_mmol_m2_sec, na.rm = TRUE),
+    CH4_NEE_se = if_else(sum(!is.na(ch4flux_mmol_m2_sec)) > 1,
+                     sd(ch4flux_mmol_m2_sec, na.rm = TRUE)/sqrt(sum(!is.na(ch4flux_mmol_m2_sec))),
+                     NA_real_),
+    
+    # Environmental variables
+    airtemp_mean = mean(airtemp_C, na.rm = TRUE),
+    soilmois_mean = mean(soilmois_percent, na.rm = TRUE),
+    spad_mean = mean(spad_leafchloro, na.rm = TRUE),
+    ndvi_mean = mean(NDVI, na.rm = TRUE),
+    
+    .groups = 'drop'
+  )
+
+NEE_site_daily <- NEE_collar_daily %>%
+  group_by(date) %>%
+  summarize(
+     # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    CO2_NEE_daily_mean = mean(CO2_NEE_mean, na.rm = TRUE),
+    CO2_NEE_daily_se = sd(CO2_NEE_mean, na.rm = TRUE)/sqrt(sum(!is.na(CO2_NEE_mean))),
+    CH4_NEE_daily_mean = mean(CH4_NEE_mean, na.rm = TRUE),
+    CH4_NEE_daily_se = sd(CH4_NEE_mean, na.rm = TRUE)/sqrt(sum(!is.na(CH4_NEE_mean))),
+    
+    n_collars = sum(!is.na(CO2_NEE_mean)),
+                    
+                        # Environmental variables
+    airtemp_mean = mean(airtemp_mean, na.rm = TRUE),
+    soilmois_mean = mean(soilmois_mean, na.rm = TRUE),
+    spad_mean = mean(spad_mean, na.rm = TRUE),
+    ndvi_mean = mean(ndvi_mean, na.rm = TRUE),
+  )
+
+NEE_site_weekly <- NEE_site_daily %>%
+  group_by(week = floor_date(date, "week")) %>%
+  summarize(
+         # Keep constants (first() is more efficient than repeating)
+    site = first(site),
+    year = first(year), 
+    month = first(month),
+    CO2_NEE_weekly_mean = mean(CO2_NEE_daily_mean, na.rm = TRUE),
+    # SE of daily means:
+    CO2_Rs_weekly_se = sd(CO2_NEE_daily_mean, na.rm = TRUE)/sqrt(sum(!is.na(CO2_NEE_daily_mean))),
+    CH4_Rs_weekly_mean = mean(CH4_NEE_daily_mean, na.rm = TRUE),
+    CH4_Rs_weekly_se = sd(CH4_NEE_daily_mean, na.rm = TRUE)/sqrt(sum(!is.na(CH4_NEE_daily_mean))),
+    
+                        # Environmental variables
+    airtemp_mean = mean(airtemp_mean, na.rm = TRUE),
+    soilmois_mean = mean(soilmois_mean, na.rm = TRUE),
+    spad_mean = mean(spad_mean, na.rm = TRUE),
+    ndvi_mean = mean(ndvi_mean, na.rm = TRUE),
+  )
+  
+```
+
+## Eddy covariance data:
+
+need to determine which variables are what, here: from his docs, I think it's:
+
+-   Reco_DT = ecosystem fluxes calculated using a "daytime" method of partitioning
+
+-   Reco = ecosystem fluxes
+
+-   co2flux.c = NEE
+
+-   nightco2 = NEE nighttime (this is the same as above when they both have measurements, but they differ in total number of measurements each, probably a partitioning thing)
+
+-   rfnee = *possibly* refined NEE? but ask Kyle
+
+-   GPP_f = gap-filled GPP data
+
+-   ndvi, rh, vwc1 and 2, precip, airt, soilt1 and 2 = NDVI, relative humidity, volumetric water content, precipitation, air temp, soil temp
+
+-   hour, month, date
+
+-   daytime = 0 or 1, night or day
+
+Eddy covariance data, final calculated fluxes from Kyle with gap-filling:
+
+```{r}
+
+# eddy covariance final data:
+conv_ec <-  read_csv(here("eddy_covariance_fluxdata", "conv_final.csv"))
+conv_ec <- conv_ec %>%
+  mutate("management" = "conventional")
+
+org_ec <- read_csv(here("eddy_covariance_fluxdata", "organic_final.csv"))
+org_ec <- org_ec %>%
+  mutate("management" = "organic")
+
+dairy_ec <- read_csv(here("eddy_covariance_fluxdata", "dairy_final.csv"))
+dairy_ec <- dairy_ec %>%
+  mutate("management" = "dairy pasture")
+
+# merge: first find those cols that intersect with organic, conventional in dairy (dairy had a methane sensor too, so the colnames don't match):
+# common colnames:
+commoncols <- intersect(names(conv_ec), names(dairy_ec))
+# select only those for dairy_ec:
+dairy_ec_filtered <- dairy_ec[, commoncols]
+
+all_ec <- rbind(conv_ec, org_ec, dairy_ec_filtered) # 215,064 rows of 155 variables
+
+# select just those variables you'll use in analyses:
+all_ec_filtered <- all_ec %>%
+  select(date, month, hour, management,
+         Reco, co2_flux.c, GPP_f, VPD,
+         ndvi, rh, vwc1, vwc2, precip, airt, soilt1, soilt2) %>%
+  #add year
+  mutate(year = year(date))
+```
+
+## Field shapes:
+
+Field shape files:
+
+```{r}
+
+fields <- st_read(here("eddy_covariance_fluxdata", "eddycovariance_fieldshapes",
+                       "Shape_File.shp"))
+```
+
+## Metadata: flux survey data
+
+Edaphic characteristics data ("met data", pretty much) found from a variety of sources.
+
+```{r}
+# pull the chamber-based environmental data from the NEE dataset: soil and air temp, PAR, chlorophyll level, etc.
+# this is small-scale, individual location based micro-habitat data. It will be useful to compare against the larger weather station data that assumes similar conditions across all three fields.
+chamb_met <- flux_19_20_NEE %>% 
+  filter(site != "CS04") %>% 
+  select(c(site, collar, datetime, date, time, hour, month, year, airtemp_C, soilmois_percent, spad_leafchloro, NDVI))
+# average across the five collars for each site visit, at each tower. First need to establish a "visit_id" identifier, since each site was visited multiple times a day.
+chamb_met <- chamb_met %>% 
+  arrange(site, date, time) %>% # sort by site, date, and time
+  # create "visit" identifier, e.g., how many times was the site visited in a single day
+  group_by(site, date, collar) %>% # group by site *and* date to reset the visit counter every day
+  mutate(
+    visit_id = row_number()
+  ) %>% 
+  ungroup
+# average across collars for each site visit:
+met_chambers <- chamb_met %>% 
+  group_by(site, date, visit_id) %>% 
+  summarize(
+    site = site,
+    year = year,
+    month = month,
+    datetime = mean(datetime, na.rm = TRUE),
+    airtemp_C_mean = mean(airtemp_C, na.rm = TRUE),
+    soilmois_mean = mean(soilmois_percent, na.rm = TRUE),
+    NDVI_mean = mean(NDVI, na.rm = TRUE),
+    spad_mean = mean(spad_leafchloro, na.rm = TRUE),
+    n_collars = n(),
+    .groups = 'drop') %>% 
+  distinct() %>% # drop duplicate rows
+  # add hour column back in:
+  mutate(hour = hour(datetime))
+
+# approximately 135 individual observations of (daytime) site conditions across 2019 and 2020 from survey data collection
+```
+
+## Metadata: EC towers
+
+there is meta-data associated with each EC tower, and we can take the average across hours/days: calculate hourly, daily average. We'll use these values for meta-data (soil temp, soil moisture, air temp, humidity, etc.) but also the averages of various fluxes.
+
+```{r}
+ec_hrly_avg <- all_ec_filtered %>% 
+  rowwise() %>%
+  mutate(soilt_avg = rowMeans(cbind(soilt1, soilt2), na.rm = TRUE),
+         vwc_avg = rowMeans(cbind(vwc1, vwc2), na.rm = TRUE)) %>% 
+  select(!c(soilt1, soilt2, vwc1, vwc2)) %>% 
+  group_by(management, date, hour) %>% 
+  summarize(across(is.numeric, mean, na.rm = TRUE), .groups = 'drop') %>% 
+  ungroup()
+
+ec_daily_avg <- all_ec_filtered %>% 
+  rowwise() %>%
+  mutate(soilt_avg = rowMeans(cbind(soilt1, soilt2), na.rm = TRUE),
+         vwc_avg = rowMeans(cbind(vwc1, vwc2), na.rm = TRUE)) %>% 
+  select(!c(soilt1, soilt2, vwc1, vwc2)) %>% 
+  group_by(management, date) %>% 
+  summarize(across(is.numeric, mean, na.rm = TRUE), .groups = 'drop') %>% 
+  mutate(Reco_se = sd(Reco, na.rm = TRUE)/sqrt(sum(!is.na(Reco))),
+         NEE_se = sd(co2_flux.c, na.rm = TRUE)/sqrt(sum(!is.na(co2_flux.c)))) %>% 
+  ungroup() %>% 
+  select(!c(hour)) %>% 
+  # extract day of year (doy):
+  mutate(doy = yday(date))
+
+```
+
+## Field management data, 2019 and 2020 (for now):
+
+```{r}
+mngmnt <- read_xlsx("management_data_collated.xlsx", sheet = 1)
+```
+
+# Preliminary visual assessments:
+
+## survey soil flux (Rs) data only
+
+### Average daily CO2 flux:
+
+```{r}
+flux_Rs_dailyavg <- flux_Rs_avg %>%
+    filter(CO2_Rs_mean < 100) %>% # randomly two values that are CRAZY high and low, like not possible
+  # calculate daily mean:
+  group_by(site, date) %>%
+  summarize(
+    site = site,
+    year = year,
+    month = month,
+    # time = as.POSIXct(mean(time, na.rm = TRUE), format = "%H:%M:%S"),
+    datetime = mean(datetime, na.rm = TRUE),
+    CO2_Rs_mean = mean(CO2_Rs_mean, na.rm = TRUE),
+    CH4_Rs_mean = mean(CH4_Rs_mean, na.rm = TRUE),
+    airtemp_mean = mean(airtemp_mean, na.rm = TRUE),
+    soilmois_mean = mean(soilmois_mean, na.rm = TRUE),
+    spad_mean = mean(spad_mean, na.rm = TRUE),
+    n_collars = n(),
+    .groups = 'drop') %>%
+  distinct() %>% # drop duplicate rows
+  # add hour column back in:
+  mutate(hour = hour(datetime))
+
+Rs_site_daily %>% 
+  ggplot(aes(x=date, y=CO2_Rs_daily_mean, color = site))+
+  geom_point(aes(fill = site))+  
+  geom_line(aes(color = site))+
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed")+
+  labs(x = "date", y = expression(paste("average CO"[2], " soil resp, umol m"^-2, "s"^-1)),
+              title = expression(paste("CO"[2], " soil resp: average daily")))+
+  scale_color_manual(values = c("EF01" = "cornflowerblue", 
+                                "EF02" = "coral", 
+                                "EF03" = "chartreuse4"),
+                                name = "site", 
+                                labels = c("organic", "conventional", "dairy pasture"))+
+  theme_bw()+
+  facet_grid(rows = vars(site))
+```
+
+boxplot:
+
+```{r}
+Rs_site_daily %>% 
+  filter(site != "EF03") %>% 
+  ggplot(aes(x=month, y=CO2_Rs_daily_mean, color = site))+
+  geom_boxplot()+
+  labs(x = "month", y = expression(paste("average CO"[2], " flux, umol m"^-2, "s"^-1)),
+              title = expression(paste("CO"[2], " efflux: average daily (opaque chamber)")))+
+  scale_color_manual(values = c("EF01" = "cornflowerblue", 
+                                "EF02" = "coral", 
+                                "EF03" = "chartreuse4"),
+                                name = "site", 
+                                labels = c("organic", "conventional", "dairy pasture"))+
+  theme_bw()+
+  facet_wrap(~year)
+```
+
+### Average daily CH4 respiration:
+
+```{r}
+# flux_Rs_dailyavg %>% 
+#   ggplot(aes(x=date, y=CH4_Rs_mean, color = site))+
+#   geom_point(aes(fill = site))+  
+#   geom_line(aes(color = site))+
+#   geom_hline(yintercept = 0, color = "red", linetype = "dashed")+
+#   labs(x = "date", y = expression(paste("average CH"[4], " soil resp, umol m"^-2, "s"^-1)),
+#               title = expression(paste("CH"[4], " soil resp: average daily")))+
+#   scale_color_manual(values = c("EF01" = "cornflowerblue", 
+#                                 "EF02" = "coral", 
+#                                 "EF03" = "chartreuse4"),
+#                                 name = "site", 
+#                                 labels = c("organic", "conventional", "dairy pasture"))+
+#   theme_bw()+
+#   facet_grid(rows = vars(site))
+
+```
+
+## survey NEE data only
+
+### Average daily NEE, CO2:
+
+```{r}
+
+NEE_site_daily %>% 
+  ggplot(aes(x=date, y=CO2_NEE_daily_mean, color = site))+
+  geom_point(aes(fill = site))+  
+  geom_line(aes(color = site))+
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed")+
+  labs(x = "month", y = expression(paste("average CO"[2], " NEE, umol m"^-2, "s"^-1)),
+              title = expression(paste("CO"[2], " NEE: average daily (clear chamber)")))+
+  scale_color_manual(values = c("EF01" = "cornflowerblue", 
+                                "EF02" = "coral", 
+                                "EF03" = "chartreuse4"),
+                                name = "site", 
+                                labels = c("organic", "conventional", "dairy pasture"))+
+  theme_bw()+
+  facet_grid(rows = vars(site))
+```
+
+Boxplot:
+
+```{r}
+NEE_site_daily %>% 
+  filter(site != "EF03") %>% 
+  ggplot(aes(x=site, y=CO2_NEE_daily_mean, color = site))+
+  geom_boxplot()+
+  labs(x = "", y = expression(paste("average CO"[2], " NEE, umol m"^-2, "s"^-1)),
+              title = expression(paste("CO"[2], " NEE: average daily (clear chamber)")))+
+  scale_color_manual(values = c("EF01" = "cornflowerblue", 
+                                "EF02" = "coral", 
+                                "EF03" = "chartreuse4"),
+                                name = "site", 
+                                labels = c("organic", "conventional", "dairy pasture"))+
+  theme_bw()
+```
+
+### Average daily NEE, CH4
+
+```{r}
+# NEE_site_daily %>% 
+#   ggplot(aes(x=date, y=CH4_NEE_daily_mean, color = site))+
+#   geom_point(aes(fill = site))+  
+#   geom_line(aes(color = site))+
+#   geom_hline(yintercept = 0, color = "red", linetype = "dashed")+
+#   labs(x = "month", y = expression(paste("average CH"[4], " NEE, umol m"^-2, "s"^-1)),
+#               title = expression(paste("CH"[4], " NEE: average daily (clear chamber)")))+
+#   scale_color_manual(values = c("EF01" = "cornflowerblue", 
+#                                 "EF02" = "coral", 
+#                                 "EF03" = "chartreuse4"),
+#                                 name = "site", 
+#                                 labels = c("organic", "conventional", "dairy pasture"))+
+#   theme_bw()+
+#   facet_grid(rows = vars(site))
+```
+
+## survey soil flux (Rs) data only
+
+### cumulative Rs, CO2:
+
+```{r}
+# Calculate cumulative budgets
+cumulative_Rs <- Rs_site_daily %>%
+  # select just one of the visits per day:
+  arrange(site, date) %>%
+  group_by(site, year) %>%
+  mutate(
+    day_of_year = yday(date),
+    cumulative_co2Rs = cumsum(CO2_Rs_daily_mean),
+    cumulative_ch4Rs = cumsum(CH4_Rs_daily_mean)
+  ) %>%
+  ungroup()
+
+# Plot cumulative R-eco - sites compared within each year:
+cumulative_Rs %>% 
+  filter(site != "EF03") %>%
+  ggplot(aes(x = day_of_year, y = cumulative_co2Rs, 
+                          group = site)) +
+  geom_point(aes(color = site))+
+  geom_line(size = 1,
+            aes(color = site)) +
+  facet_wrap(~ year)+
+  labs(
+    title = "Cumulative carbon dioxide flux (soil, chamber-based)",
+    x = "Day of Year",
+    y = expression(paste("CO"[2], " flux: respiration (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "Site") +
+  theme_minimal()+
+  scale_color_manual(values = c("EF01" = "cornflowerblue",
+                                "EF02" = "coral",
+                                "EF03" = "chartreuse4"),
+                                name = "site",
+                                labels = c("organic", "conventional", "dairy pasture"))
+
+```
+
+### cumulative Rs, CH4:
+
+```{r}
+
+# # Plot cumulative R-eco (CH4) - sites compared within each year:
+# ggplot(cumulative_Rs, aes(x = day_of_year, y = cumulative_ch4Rs, 
+#                           group = site)) +
+#   geom_point(aes(color = site))+
+#   geom_line(size = 1,
+#             aes(color = site)) +
+#   facet_wrap(~ year)+
+#   labs(
+#     title = "Cumulative methane flux (soil, chamber-based)",
+#     x = "Day of Year",
+#     y = expression(paste("CH"[4], " flux (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+#     color = "Site") +
+#   theme_minimal()+
+#   scale_color_manual(values = c("EF01" = "cornflowerblue", 
+#                                 "EF02" = "coral", 
+#                                 "EF03" = "chartreuse4"),
+#                                 name = "site", 
+#                                 labels = c("organic", "conventional", "dairy pasture"))
+```
+
+## survey NEE data only
+
+### cumulative NEE, CO2:
+
+```{r}
+
+cumulative_NEE <- NEE_site_daily %>%
+  arrange(site, date) %>%
+  group_by(site, year) %>%
+  mutate(
+    day_of_year = yday(date),
+    cumulative_co2NEE = cumsum(CO2_NEE_daily_mean),
+    cumulative_ch4NEE = cumsum(CH4_NEE_daily_mean)
+  ) %>%
+  ungroup()
+
+# Plot cumulative soil NEE - sites compared within each year
+cumulative_NEE %>% 
+  filter(site != "EF03") %>%
+    # filter(site == "EF03") %>% 
+  ggplot(aes(x = day_of_year, y = cumulative_co2NEE, group = site)) +
+  geom_point(aes(color = site))+
+  geom_line(size = 1, aes(color = site)) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  facet_wrap(~ year) +
+  labs(
+    title = "Cumulative carbon dioxide NEE (soil and plants, chamber-based)",
+    x = "Day of Year",
+    y = expression(paste("CO"[2], " NEE (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "Site") +
+  theme_bw()+
+  scale_color_manual(values = c("EF01" = "cornflowerblue",
+                                "EF02" = "coral",
+                                "EF03" = "chartreuse4"),
+                                name = "site",
+                                labels = c("organic",
+                                           "conventional",
+                                           "dairy pasture"))
+  # scale_color_manual(values = c("EF01" = "cornflowerblue", 
+  #                               "EF02" = "coral"),
+  #                               name = "site", 
+  #                               labels = c("organic", 
+  #                                          "conventional"))
+
+
+```
+
+### cumulative NEE, CH4:
+
+```{r}
+# 
+# # Plot cumulative soil NEE (CH4) - sites compared within each year
+# ggplot(cumulative_NEE, aes(x = day_of_year, y = cumulative_ch4NEE, group = site)) +
+#   geom_point(aes(color = site))+
+#   geom_line(size = 1, aes(color = site)) +
+#   geom_hline(yintercept=0, linetype="dashed", color = "red")+
+#   facet_wrap(~ year) +
+#   labs(
+#     title = "Cumulative methane NEE (soil and plants, chamber-based)",
+#     x = "Day of Year",
+#     y = expression(paste("CH"[4], " NEE (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+#     color = "Site") +
+#   theme_minimal()+
+#   scale_color_manual(values = c("EF01" = "cornflowerblue", 
+#                                 "EF02" = "coral", 
+#                                 "EF03" = "chartreuse4"),
+#                                 name = "site", 
+#                                 labels = c("organic", "conventional", "dairy pasture"))
+
+
+```
+
+## Co-associated meta-data:
+
+### Survey chamber: soil moisture, temperature, leaf greenness (SPAD), and NDVI.
+
+```{r fig.width=10, fig.height=7}
+
+# named vector for mapping:
+# var_labels <- c("airtemp_mean" = "daily air temp (C)",
+#                 "ndvi_mean" = "NDVI",
+#                 "soilmois_mean" = "soil mois (%)",
+#                 "spad_mean" = "leaf chlorophyll")
+# 
+# flux_19_20_NEE %>% # NEE data include spad and NDVI
+#   filter(site != "CS04") %>%
+#   filter(site != "EF03") %>%
+#   replace_with_na_at(.vars = "NDVI",
+#                      condition = ~.x > 1) %>% # remove spurious NDVI values (five values over 60)
+#   gather(-site, -month, -collar, -date, -endtime, -starttime, -light_dark, -obs_length,
+#          -co2flux_mmol_m2_sec, -ch4flux_mmol_m2_sec, -year, -datetime, -hour, -time,
+#          key = "environ_var", value = "value",
+#          ) %>%
+#   # deselect variables we don't need:
+#   select(-c(co2flux_mmol_m2_sec, ch4flux_mmol_m2_sec)) %>%
+#   ggplot(aes(x = as.factor(month), y = value, fill = site))+
+#   geom_boxplot()+
+#   geom_jitter(color = "red", alpha = 0.2, size = 0.1)+
+#   scale_fill_discrete(name = "management:", labels = c("regenerative corn", "conventional corn", "organic dairy pasture"))+
+#   labs(x = "month",
+#        y = element_blank())+
+#   facet_grid(environ_var~ year,
+#              scales = "free",
+#              labeller = labeller(environ_var = var_labels))+ # Add labeller here
+#   theme_bw()
+
+NEE_site_daily %>% # NEE data include spad and NDVI
+  filter(site != "CS04") %>%
+  filter(site != "EF03") %>%
+  replace_with_na_at(.vars = "NDVI_mean",
+                     condition = ~.x > 1) %>% # remove spurious NDVI values
+  gather(-site,
+         -month,
+         -date,
+         -year,
+         -CH4_NEE_daily_mean,
+         -CO2_NEE_daily_mean,
+         -CO2_NEE_daily_se,
+         -CH4_NEE_daily_se,
+         -n_collars,
+         key = "environ_var", value = "value",
+         ) %>%
+  # deselect variables we don't need:
+  select(-c(n_collars,
+            CO2_NEE_daily_mean,CO2_NEE_daily_se,
+            CH4_NEE_daily_mean, CH4_NEE_daily_se)) %>%
+  ggplot(aes(x = as.factor(month), y = value, fill = site))+
+  geom_boxplot()+
+  geom_jitter(color = "red", alpha = 0.2, size = 0.1)+
+  scale_fill_discrete(name = "management:",
+                      labels = c("regenerative corn",
+                                 "conventional corn", "organic dairy pasture"))+
+  labs(x = "month",
+       y = element_blank())+
+  facet_grid(environ_var~ year,
+             scales = "free",
+             labeller = labeller(environ_var = var_labels))+ # Add labeller here
+  theme_bw()
+```
+
+### Survey chamber: soil moisture alone
+
+```{r}
+met_chambers %>%
+  filter(site != "EF03") %>% 
+  ggplot(aes(y=soilmois_mean, x=date))+
+  geom_point(color = "darkblue", alpha = 0.25)+
+  geom_line(color = "darkblue", alpha = 0.1)+
+  geom_vline(xintercept = as.POSIXct("2020-01-01"), color = "red")+
+  ylab("Daily soil moisture (%) at 10-15cm")+
+  xlab(element_blank())+
+  facet_wrap(~site)+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+use EC data for round-the-clock data
+
+### EC towers: soil moisture
+
+```{r}
+ec_daily_avg %>% 
+  filter(year == 2019 | year == 2020) %>% 
+  ggplot(aes(y=vwc_avg, x=date))+
+  geom_point(alpha = 0.25)+
+  geom_vline(xintercept = as.Date("2020-01-01"), color = "darkred")+
+  ylab("Daily mean soil moisture (VWC) at 10-15cm")+
+  xlab(element_blank())+
+  # facet_wrap(~management)+
+  geom_smooth(method = "loess", span = 0.28, se=F, color = "red")+
+  theme_classic()
+  # theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+```
+
+### EC towers: soil *and* air temp
+
+```{r}
+ec_daily_avg %>% 
+  filter(year == 2019 | year == 2020) %>% 
+  filter(management != "dairy pasture") %>% 
+  ggplot(aes(y=airt, x=doy))+
+  geom_point(color = "lightblue", alpha = 0.7)+
+  geom_point(aes(y=soilt_avg, x=doy), color = "darkred", alpha = 0.7)+
+  ylab("Temperature (C)")+
+  xlab("day of year")+
+  facet_wrap(~year)+
+  # geom_smooth(method = "loess", span = 0.28, se=F)+
+  theme_classic()
+```
+
+### EC towers: rainfall
+
+```{r}
+ec_daily_avg %>% 
+  filter(year == 2019 | year == 2020) %>% 
+  ggplot(aes(y=precip, x=date))+
+  geom_point(color = "darkblue", alpha = 0.25)+
+  # geom_line(color = "darkblue", alpha = 0.25)+
+  # geom_col(width = 50, alpha = .1)+
+  # geom_vline(xintercept = as.Date("2020-07-01"), color = "darkred", linetype = "longdash", size = 1)+
+  # geom_vline(xintercept = as.Date("2019-07-01"), color = "darkblue", linetype = "longdash", size = 1)+
+  
+  geom_smooth(method = "loess", span = 0.28, se=F, color = "red")+
+  
+  ylab("Daily mean precipitation (unknown units)")+
+  xlab(element_blank())+
+  # facet_wrap(~management)+
+  # geom_smooth(method = "loess", span = 0.1, se=F, color = "white")+
+  theme_classic()+  
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+```
+
+### EC towers: NDVI
+
+```{r}
+ec_daily_avg %>% 
+  filter(year == 2019 | year == 2020) %>%
+  filter(management != "dairy pasture") %>% 
+  ggplot(aes(y=ndvi, x=date, color = management))+
+  geom_point(alpha = 0.25)+
+  ylab("Daily mean NDVI")+
+  xlab(element_blank())+
+  # facet_wrap(~management)+
+  # geom_smooth(method = "loess", span = 0.28, se=F, color = "red")+
+  theme_classic()
+  # theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+```
+
+# EC towers:
+
+### cumulative GPP
+
+```{r}
+
+cumulative_ec <- ec_daily_avg %>%
+  arrange(management, date) %>%
+  group_by(management, year) %>%
+  mutate(
+    cumulative_Rs = cumsum(Reco),
+    cumulative_NEE = (cumsum(ifelse(is.na(co2_flux.c), 0, co2_flux.c)) + 
+      co2_flux.c*0),
+    cumulative_GPP = cumsum(GPP_f)
+  ) %>%
+  ungroup()
+
+# Plot cumulative GPP - sites compared within each year
+cumulative_ec %>% 
+  filter(management != "dairy pasture") %>%
+  # filter(management == "dairy pasture") %>% 
+  # filter(year == 2019 | year == 2020) %>% 
+  filter(year != 2022) %>% 
+  ggplot(aes(x = doy, y = cumulative_GPP, group = management)) +
+  # ggplot(aes(x = doy, y = cumulative_NEE, group = management)) +
+  geom_point(aes(color = management), alpha = 0.15)+
+  geom_line(size = 1, aes(color = management), alpha = 0.5) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  facet_wrap(~ year) +
+  labs(
+    title = "Cumulative productivity (EC tower)",
+    x = "Day of Year",
+    y = expression(paste("CO"[2], " GPP (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    # y = "gross primary productivity",
+    # y = "net ecosystem exchange",
+    color = "management") +
+  # theme_minimal()+
+  theme_bw()+
+  # scale_color_manual(values = c("organic" = "cornflowerblue",
+                                # "conventional" = "brown"))
+  # scale_color_manual(values = c("EF01" = "cornflowerblue",
+  #                               "EF02" = "coral",
+  #                               "EF03" = "chartreuse4"),
+  #                               name = "site",
+  #                               labels = c("organic",
+  #                                          "conventional",
+  #                                          "dairy pasture"))
+  scale_color_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+                                name = "management",
+                                labels = c("organic",
+                                           "conventional"))
+```
+
+### hourly GPP
+
+```{r}
+ec_hrly_avg %>% 
+  filter(management != "dairy pasture") %>%
+  filter(year == 2019 | year == 2020 | year == 2021) %>%
+  ggplot(aes(x = as.factor(hour), y = GPP_f, fill = management)) +
+  geom_boxplot(outlier.size = 0.25, outlier.alpha = 0.25)+
+  facet_wrap(~ year) +
+  labs(
+    x = "Hour of day",
+    y = expression(paste("CO"[2], " GPP (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "management") +
+  theme_bw()+
+  scale_fill_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+```
+
+### cumulative Reco
+
+```{r}
+# Plot cumulative soil respiration - sites compared within each year
+cumulative_ec %>% 
+  filter(management != "dairy pasture") %>%
+  # filter(management == "dairy pasture") %>% 
+  # filter(year == 2019 | year == 2020) %>% 
+  filter(year != 2022) %>% 
+  ggplot(aes(x = doy, y = cumulative_Rs, group = management)) +
+  # ggplot(aes(x = doy, y = cumulative_NEE, group = management)) +
+  geom_point(aes(color = management), alpha = 0.15)+
+  geom_line(size = 1, aes(color = management), alpha = 0.5) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  facet_wrap(~ year) +
+  labs(
+    title = "Cumulative respiration (EC tower)",
+    x = "Day of Year",
+    y = expression(paste("CO"[2], " respiration (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    # y = "gross primary productivity",
+    # y = "net ecosystem exchange",
+    color = "management") +
+  # theme_minimal()+
+  theme_bw()+
+  # scale_color_manual(values = c("organic" = "cornflowerblue",
+                                # "conventional" = "brown"))
+  # scale_color_manual(values = c("EF01" = "cornflowerblue",
+  #                               "EF02" = "coral",
+  #                               "EF03" = "chartreuse4"),
+  #                               name = "site",
+  #                               labels = c("organic",
+  #                                          "conventional",
+  #                                          "dairy pasture"))
+  scale_color_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+                                name = "management",
+                                labels = c("organic",
+                                           "conventional"))
+```
+
+### hourly Reco
+
+```{r}
+ec_hrly_avg %>% 
+  filter(management != "dairy pasture") %>%
+  filter(year == 2019 | year == 2020 | year == 2021) %>%
+  ggplot(aes(x = as.factor(hour), y = Reco, fill = management)) +
+  geom_boxplot(outlier.size = 0.25, outlier.alpha = 0.25)+
+  facet_wrap(~ year) +
+  labs(
+    x = "Hour of day",
+    y = expression(paste("CO"[2], " R"[eco], " (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "management") +
+  theme_bw()+
+  scale_fill_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+
+```
+
+### cumulative NEE
+
+```{r}
+cumulative_ec %>% 
+  filter(management != "dairy pasture") %>%
+  # filter(management == "dairy pasture") %>% 
+  filter(year == 2019 | year == 2020) %>%
+  filter(year != 2022) %>% 
+  ggplot(aes(x = doy, y = cumulative_NEE, group = management)) +
+  # ggplot(aes(x = doy, y = cumulative_NEE, group = management)) +
+  geom_point(aes(color = management), alpha = 0.15)+
+  geom_line(size = 1, aes(color = management), alpha = 0.5) +
+  geom_hline(yintercept=0, linetype="dashed", color = "red")+
+  facet_wrap(~ year) +
+  labs(
+    title = "Cumulative NEE (EC tower)",
+    x = "Day of Year",
+    y = expression(paste("CO"[2], " NEE (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "management") +
+  # theme_minimal()+
+  theme_bw()+
+  scale_color_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+                                name = "management",
+                                labels = c("organic",
+                                           "conventional"))
+```
+
+### hourly NEE
+
+```{r}
+ec_hrly_avg %>% 
+  filter(management != "dairy pasture") %>%
+  filter(year == 2019 | year == 2020 | year == 2021) %>%
+  ggplot(aes(x = as.factor(hour), y = co2_flux.c, fill = management)) +
+  geom_boxplot(outlier.size = 0.25, outlier.alpha = 0.25)+
+  facet_wrap(~ year) +
+  labs(
+    x = "Hour of day",
+    y = expression(paste("CO"[2], " NEE (" * mu * "mol m"^-2 * " s"^-1 * ")")),
+    color = "management") +
+  theme_bw()+
+  scale_fill_manual(values = c("organic" = "cornflowerblue",
+                                "conventional" = "coral"))
+
+```
+
+### cumulative daily Rs, NEE
+
+```{r}
+# ec_hourly_avg aggregate for cumulative daily:
+ec_daily_cum <- ec_hrly_avg %>% 
+  mutate(co2_flux.c = na_if(co2_flux.c, NaN)) %>% 
+  group_by(date, management) %>%
+  summarise(NEE_daily_cum = sum(co2_flux.c, na.rm = TRUE),
+            Reco_daily_cum = sum(Reco, na.rm = TRUE),
+            soilt_avg = mean(soilt_avg, na.rm = TRUE),
+            vwc_avg = mean(vwc_avg, na.rm = TRUE))
+```
+
+# Management data
+
+### Gantt chart
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Convert date to proper format
+mngmnt$date <- as.Date(mngmnt$date, format = "%m/%d/%y")
+mngmnt$duration <- as.numeric(mngmnt$duration)
+mngmnt <- mngmnt %>% 
+  mutate(site = case_when(field == 'EF01' ~ 'organic',
+                          field == 'EF02' ~ 'conventional',
+                          field == 'EF03' ~ 'dairy pasture'))
+
+mngmnt %>% 
+  # filter(year == 2019 | year == 2020) %>% 
+  filter(site != "dairy pasture") %>% # comment out for all three including pasture
+  ggplot(aes(x = date, y = site, color = category)) +
+  geom_point(size = 5, alpha = 0.75,
+             position = ggstance::position_dodgev(height = 0.7)) +
+  # geom_linerange(aes(xmin = date, xmax = date+duration),
+  #                # size = 5,
+  #                linewidth = 5,
+  #                # alpha = 0.75,
+  #                position = ggstance::position_dodgev(height = 0.7))+
+  scale_x_date(date_labels = "%d %b %Y") +
+  theme_minimal() +
+  labs(title = "Farm Management Activities Timeline",
+       x = "", y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_brewer(palette = "RdYlBu")
+```
+
+### Crop rotation viz
+
+```{r}
+mngmnt %>% 
+  filter(site != "dairy pasture") %>% # comment out for all three including pasture
+  ggplot(aes(x = date, y = site, color = crop)) +
+  geom_point(size = 5, alpha = 0.75,
+             position = ggstance::position_dodgev(height = 0.7)) +
+  scale_x_date(date_labels = "%d %b %Y") +
+  theme_minimal() +
+  labs(title = "Crop Rotations: Organic and Conventional Grains",
+       x = "", y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_brewer(palette = "RdYlBu")
+```
+
+Notes for next steps:
+
+-   use generalized additive model to fit co2 effluxes (opaque chamber) - use GAM to fit co2 exchange (clear chamber) - "Generalized linear models (GLM) were used to determine if there were significant differences between the chamber fluxes of CO2 and CH4 across landcover types after log-transformation in R (R Core Team, version 4.1.0) (Figure S6 in Supporting Information S1). Then, planned pairwise t-tests with Bonferroni's correction were used to compare between land covers."
+
+-   "For eddy covariance GAMs, **daily cumulative sums of CO2 and CH4 exchange** were used (n = 993), as well as daily averages for all predictor variables except for PAR, where the daily maximum was used. Daily maximum PAR was used because it better represents sunlight availability compared to daily averaged PAR. Then for chamber GAMs, soil CO2 and CH4 fluxes were used as well as ancillary measurements from the half-hour coinciding with the chamber flux measurement. GAMS were first created for chamber fluxes across all land covers; then, individual GAMs were created for fluxes within each land cover."
+
+-   <https://m-clark.github.io/generalized-additive-models/application.html>
+
+# GAM models
+
+```{r}
+# devtools::install_github("m-clark/visibly")
+library(visibly)
+library(mgcv) # visualizing gam model results in Dharma
+library(DHARMa)
+library(gratia)
+```
+
+## Final chamber-based Rs and NEE datasets with associated meteorological data, more general edaphic conditions from tower nearby
+
+```{r}
+
+# pull met data from the NEE file and pair with Rs file (in cleaning process I did not do this) to make sure that all the chamber-specific data is there for both (soil moisture, RH, air temp, and SPAD).
+
+Rs_collar_daily <- Rs_collar_daily %>% 
+  select(-c(airtemp_mean)) %>%
+  left_join(NEE_collar_daily %>% select(site, year, date,
+                                    airtemp_mean, soilmois_mean, spad_mean),
+            by = c("site", "year", "date"))
+
+# create SUPERDATASETS by merging the Rs and NEE (chamber) data with the EC data: Reco_Rs_combined, and NEE_clear_combined
+#####
+# combine with survey data: respiration (Rs) and NEE (clear chamber)
+Reco_Rs_combined <- Rs_collar_daily %>% 
+  # rename EFO tower names:
+  mutate(site = case_when(site == 'EF01' ~ 'organic',
+                          site == 'EF02' ~ 'conventional',
+                          site == 'EF03' ~ 'dairy pasture')) %>% 
+  left_join(ec_hrly_avg, by = join_by(date, hour, site == management)) %>% 
+  mutate_all(~ifelse(is.nan(.), NA, .)) %>% 
+  # rename all cols as needed:
+  rename(co2_Rsoil = CO2_Rs_mean,
+         ch4_Rsoil = CH4_Rs_mean,
+         co2_Reco = Reco,
+         co2_NEE_ec = co2_flux.c) %>% 
+  # convert date back to posixct
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d", tz = "GMT")) %>% 
+  # deselect cols you don't need
+  select(!c(datetime, year.y, month.y)) %>% rename(year = year.x, month = month.x) %>% 
+  # add date of year (doy):
+  mutate(doy = yday(date)) %>% 
+  filter(co2_Rsoil < 1000) # remove erroneously large flux values
+
+NEE_clear_combined <- NEE_collar_daily %>% 
+  # rename EFO tower names:
+  mutate(site = case_when(site == 'EF01' ~ 'organic',
+                          site == 'EF02' ~ 'conventional',
+                          site == 'EF03' ~ 'dairy pasture')) %>% 
+  # rename the survey flux cols so it's clear they're nee
+  # rename(co2_NEE_chmb = CO2_Rs_mean,
+         # ch4_NEE_chmb = CH4_Rs_mean) %>% 
+  left_join(ec_hrly_avg, by = join_by(date, hour, site == management)) %>% 
+  mutate_all(~ifelse(is.nan(.), NA, .)) %>% 
+  # rename all cols as needed:
+  rename(co2_Reco = Reco,
+         co2_NEE_ec = co2_flux.c) %>% 
+  # convert date back to posixct
+  mutate(date = as.POSIXct(date, format = "%Y-%m-%d", tz = "GMT")) %>% 
+  # deselect cols you don't need
+  select(!c(datetime, year.y, month.y)) %>% rename(year = year.x, month = month.x) %>% 
+  # add date of year (doy):
+  mutate(doy = yday(date))
+
+```
+
+### GAM: average daily NEE (EC)
+
+```{r}
+
+# make model of average daily net ecosystem exchange using eddy covariance data
+
+# add PAR:
+ec_hrly_avg <- ec_hrly_avg %>% 
+  left_join(bws_avghrly, by = join_by(date, hour))
+
+# use PAR to split daytime nee and nighttime nee
+ec_hrly_day <- ec_hrly_avg %>% filter(par_umolm2sec > 10)
+ec_hrly_night <- ec_hrly_avg %>% filter(par_umolm2sec < 10)
+
+# NOTE: this resulted in a lot of excluded data bc of NAs in the PAR column
+
+gam_nee <- gam(co2_flux.c~management +
+                     # s(par_umolm2sec, by = management, k = 20)+
+                     s(airtemp_C)+
+                     s(soiltemp_C)+
+                     s(year.x, bs = "re"),
+                   data = ec_hrly_avg)
+
+
+
+```
+
+# Gini analysis of heterogeneity:
+
+The Lorenz curve is a graph of the empirically derived cumulative percentage of collars (X axis) vs. cumulative percentage of flux (Y axis). The line Y=X is the line that characterizes a uniform distribution of flux in which all collars of the population have an equal flux. The GINI coefficient is simply a measure of the area between these two curves, normalized so that a maximally unequal distribution of flux (e.g. one collar generally shows abnormally high or low flux) takes on a value of closer to 1.0.
+
+```{r}
+
+# Summarize flux data by location (e.g., chamber or sensor ID) to capture spatial heterogeneity
+Rs_summary_by_location <- flux_19_20_Rs %>%
+  filter(site != "CS04") %>% 
+  filter(co2flux_mmol_m2_sec < 1000) %>%  # filter out the two massive ones, these are errors
+    # rename EFO tower names:
+  mutate(site = case_when(site == 'EF01' ~ 'organic',
+                          site == 'EF02' ~ 'conventional',
+                          site == 'EF03' ~ 'dairy pasture')) %>% 
+  group_by(collar, site, year) %>%
+  # group_by(collar, site, year, hour) %>%
+  summarize(mean_Rs_CO2 = mean(co2flux_mmol_m2_sec, na.rm = TRUE),
+            mean_Rs_CH4 = mean(ch4flux_mmol_m2_sec, na.rm = TRUE)) %>%
+  ungroup()
+
+# Function to calculate Lorenz curve data for ggplot and Gini coefficient
+# Lc computes the (empirical) ordinary and generalized Lorenz curve of a vector x. Desc calculates some key figures for a Lorenz curve and produces a quick description.
+lorenz_data_with_gini <- function(flux) {
+  lc <- Lc(flux)
+  data.frame(p = lc$p, L = lc$L) # p = percentages, L = values of Lorenz curve
+}
+
+# Calculate Lorenz curve data and Gini coefficients for each method based on spatial locations, hour
+lorenz_per_site_RsCO2 <- Rs_summary_by_location %>%
+  group_by(site, year) %>%
+  summarize(
+    data = list(lorenz_data_with_gini(mean_Rs_CO2)),
+    Gini_flux = Gini(mean_Rs_CO2, na.rm = TRUE)
+  ) %>%
+  unnest(cols = c(data))
+
+# Plot Lorenz curves to visualize spatial heterogeneity and overlay Gini coefficients
+lorenz_per_site_RsCO2 %>% 
+  filter(site != "dairy pasture") %>% 
+  ggplot(aes(x = p, y = L, color = site)) +
+  geom_line(size = 1) +
+  geom_point(size = 2, alpha = 0.6) +  # Add individual points
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") + # 45-degree equality line
+  facet_grid(~ site*year) +
+  scale_color_manual(values = c("darkred", "forestgreen", "skyblue")) +
+  labs(
+    x = "Cumulative Share of Chambers",
+    y = "Cumulative Share of Flux"
+    # title = "Gini "
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none",
+    panel.grid.major = element_line(color = "gray90", size = 0.25), # Add major gridlines
+    #panel.grid.minor = element_line(color = "gray90", size = 0.25)  # Add minor gridlines
+  ) +
+  geom_text(aes(x = 0.8, y = 0.2, label = paste("Gini:", sprintf("%.2f", Gini_flux))),
+            color = "black", size = 4, inherit.aes = FALSE)
+```
+
+# CCC: relationship between survey chambers and tower data: during overlapping hours, considering both agreement and bias:
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(zoo)  # For rollapply function
+library(lubridate)
+library(epiR)  # For Lin's CCC calculation
+
+#### Step 1: combine eddy covariance, survey data for when the date/time matches (by hourly average for 2019, 2020)
+# did this when visualizing EC met-data (see above)
+
+
+
+```
+
+```{r}
+
+# Step 2: Calculate 3-hour rolling means for both survey chambers and towers, by year and location
+rollingmean <- Reco_Rs_combined %>%
+  arrange(hour) %>%  # Ensure data is sorted by time
+  mutate(
+    survey_rolling_mean = rollapply(co2_Rsoil, width = 3, FUN = mean, fill = NA, align = "right"),
+    tower_rolling_mean = rollapply(co2_Reco, width = 3, FUN = mean, fill = NA, align = "right")
+  ) %>%
+  filter(!is.na(survey_rolling_mean) & !is.na(tower_rolling_mean))
+
+# Step 3: Fit the linear model to the full data
+model <- lm(survey_rolling_mean ~ tower_rolling_mean, data = rollingmean)
+# Extract the slope, intercept, and R-squared
+slope <- coef(model)[2]
+intercept <- coef(model)[1]
+r_squared <- summary(model)$r.squared
+
+# Step 4: Calculate Lin's Concordance Correlation Coefficient (CCC)
+ccc_result <- epi.ccc(rollingmean$survey_rolling_mean, rollingmean$tower_rolling_mean)
+ccc_value <- ccc_result$rho.c$est  # Extract the CCC estimate
+
+# Create the equation text including R² and CCC
+equation_label <- paste0("y = ", round(intercept, 2), " + ", round(slope, 2), "x,  R² = ", round(r_squared, 2), 
+                         ", CCC = ", round(ccc_value, 2))
+
+# Step 5: Plot the comparison of the two systems with rolling means
+ggplot(rollingmean, aes(x = tower_rolling_mean, y = survey_rolling_mean)) +
+  geom_point(alpha=0.3) +
+  labs(x = expression(paste("Eddy Covariance Tower: Mean R"[eco]," (3-Hour Rolling)")), 
+       y = expression(paste("Survey Chamber: Mean R"[s]," (3-Hour Rolling)")),
+       title = "2019-2020 data") +
+  theme_classic() +
+  xlim(0,15)+ylim(0,25)+
+  geom_smooth(method = "lm", color = "darkorange") +  # Linear regression line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + # Add a 1:1 line
+  annotate("text", x = 7, y = Inf, label = equation_label, 
+           hjust = 1, vjust = 1.5, size = 4, color = "darkorange") + # Add the equation, R-squared, and CCC
+  cat("Slope:", slope, "\nR²:", r_squared, "\nLin's CCC:", round(ccc_value, 2), "\n")
+```
+
+```{r}
+# Again, but by year: calculate 3-hour rolling means for both survey chambers and towers, by year
+rollingmean_2019 <- Reco_Rs_combined %>%
+  # remove erroneous points
+  filter(co2_Rsoil < 1000) %>% 
+  filter(year == 2019) %>% 
+  arrange(hour) %>%  # Ensure data is sorted by time
+  mutate(
+    survey_rolling_mean = rollapply(co2_Rsoil, width = 3, FUN = mean, fill = NA, align = "right"),
+    tower_rolling_mean = rollapply(co2_Reco, width = 3, FUN = mean, fill = NA, align = "right")
+  ) %>%
+  filter(!is.na(survey_rolling_mean) & !is.na(tower_rolling_mean))
+
+# Step 3: Fit the linear model to the full data
+model <- lm(survey_rolling_mean ~ tower_rolling_mean, data = rollingmean_2019)
+# Extract the slope, intercept, and R-squared
+slope <- coef(model)[2]
+intercept <- coef(model)[1]
+r_squared <- summary(model)$r.squared
+
+# Step 4: Calculate Lin's Concordance Correlation Coefficient (CCC)
+ccc_result <- epi.ccc(rollingmean_2019$survey_rolling_mean, rollingmean_2019$tower_rolling_mean)
+ccc_value <- ccc_result$rho.c$est  # Extract the CCC estimate
+
+# Create the equation text including R² and CCC
+equation_label <- paste0("y = ", round(intercept, 2), " + ", round(slope, 2), "x,  R² = ", round(r_squared, 2), 
+                         ", CCC = ", round(ccc_value, 2))
+
+# Step 5: Plot the comparison of the two systems with rolling means
+ggplot(rollingmean_2019, aes(x = tower_rolling_mean, y = survey_rolling_mean)) +
+  geom_point(alpha=0.3) +
+  labs(x = expression(paste("Eddy Covariance Tower: Mean R"[eco]," (3-Hour Rolling)")), 
+       y = expression(paste("Survey Chamber: Mean R"[s]," (3-Hour Rolling)")),
+       title = "2019 data only") +
+  theme_classic() +  
+  xlim(0,15)+ylim(0,25)+
+  geom_smooth(method = "lm", color = "darkorange") +  # Linear regression line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + # Add a 1:1 line
+  annotate("text", x = 7, y = Inf, label = equation_label, 
+           hjust = 1, vjust = 1.5, size = 4, color = "darkorange") + # Add the equation, R-squared, and CCC
+  cat("Slope:", slope, "\nR²:", r_squared, "\nLin's CCC:", round(ccc_value, 2), "\n")
+```
+
+```{r}
+# Again, but by year: calculate 3-hour rolling means for both survey chambers and towers, by year
+rollingmean_2020 <- Reco_Rs_combined %>%
+  # remove erroneous points
+  filter(co2_Rsoil < 1000) %>% 
+  filter(year == 2020) %>% 
+  arrange(hour) %>%  # Ensure data is sorted by time
+  mutate(
+    survey_rolling_mean = rollapply(co2_Rsoil, width = 3, FUN = mean, fill = NA, align = "right"),
+    tower_rolling_mean = rollapply(co2_Reco, width = 3, FUN = mean, fill = NA, align = "right")
+  ) %>%
+  filter(!is.na(survey_rolling_mean) & !is.na(tower_rolling_mean))
+
+# Step 3: Fit the linear model to the full data
+model <- lm(survey_rolling_mean ~ tower_rolling_mean, data = rollingmean_2020)
+# Extract the slope, intercept, and R-squared
+slope <- coef(model)[2]
+intercept <- coef(model)[1]
+r_squared <- summary(model)$r.squared
+
+# Step 4: Calculate Lin's Concordance Correlation Coefficient (CCC)
+ccc_result <- epi.ccc(rollingmean_2020$survey_rolling_mean, rollingmean_2020$tower_rolling_mean)
+ccc_value <- ccc_result$rho.c$est  # Extract the CCC estimate
+
+# Create the equation text including R² and CCC
+equation_label <- paste0("y = ", round(intercept, 2), " + ", round(slope, 2), "x,  R² = ", round(r_squared, 2), 
+                         ", CCC = ", round(ccc_value, 2))
+
+# Step 5: Plot the comparison of the two systems with rolling means
+ggplot(rollingmean_2020, aes(x = tower_rolling_mean, y = survey_rolling_mean)) +
+  geom_point(alpha=0.3) +
+  labs(x = expression(paste("Eddy Covariance Tower: Mean R"[eco]," (3-Hour Rolling)")), 
+       y = expression(paste("Survey Chamber: Mean R"[s]," (3-Hour Rolling)")),
+       title = "2020 data only") +
+  theme_classic() +
+  xlim(0,15)+ylim(0,25)+
+  geom_smooth(method = "lm", color = "darkorange") +  # Linear regression line
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") + # Add a 1:1 line
+  annotate("text", x = 7, y = Inf, label = equation_label, 
+           hjust = 1, vjust = 1.5, size = 4, color = "darkorange") + # Add the equation, R-squared, and CCC
+  cat("Slope:", slope, "\nR²:", r_squared, "\nLin's CCC:", round(ccc_value, 2), "\n")
+```
+
+# Q10 temperature sensitivity (sensitivity of Rs with each 10deg change in soil temp)
+
+## 2019, Rs
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+
+# Function to fit the model, create predictions, and calculate SE manually
+fit_nls_and_predict_with_se <- function(data, flux_col, temp_col) {
+  tryCatch({
+    # Create the formula dynamically
+    formula_str <- paste(flux_col, "~ a * exp(b *", temp_col, ")")
+    
+    # Fit the non-linear model
+    nls_model <- nls(as.formula(formula_str), 
+                     data = data, 
+                     start = list(a = 1, b = 0.1))
+    
+    # Create predictions for the given sequence of soil temperatures
+    newdata_df <- data.frame(temp_col = soiltemp_seq)
+    names(newdata_df) <- temp_col
+    predictions <- predict(nls_model, newdata = newdata_df)
+    
+    # Get the covariance matrix and parameter estimates
+    cov_matrix <- vcov(nls_model)
+    params <- coef(nls_model)
+    
+    # Calculate the Jacobian matrix
+    jacobian <- cbind(exp(params["b"] * soiltemp_seq), 
+                      params["a"] * soiltemp_seq * exp(params["b"] * soiltemp_seq))
+    
+    # Calculate standard errors
+    se <- sqrt(rowSums((jacobian %*% cov_matrix) * jacobian))
+    
+    # Return the predictions and SE
+    return(data.frame(
+      temp = soiltemp_seq,
+      flux = predictions,
+      se = se
+    ))
+  }, error = function(e) {
+    return(data.frame(temp = soiltemp_seq, 
+                      flux = NA, 
+                      se = NA))
+  })
+}
+
+# Filter Rsoil to remove two major outliers, isolate to 2019:
+Reco_Rs_combined_2019 <- Reco_Rs_combined %>% 
+  filter(year == 2019)
+
+# Generate a sequence of soil temperatures for predictions
+soiltemp_seq <- seq(
+  min(Reco_Rs_combined_2019$soilt_avg, na.rm = TRUE), 
+  max(Reco_Rs_combined_2019$soilt_avg, na.rm = TRUE), 
+  length.out = 100
+)
+
+# Apply the function across each location to get predictions with SE
+predictions <- Reco_Rs_combined_2019 %>%
+  group_by(site) %>%
+  do(fit_nls_and_predict_with_se(., "co2_Rsoil", "soilt_avg")) %>%
+  ungroup()
+
+# Remove any rows with NA values in the predictions
+predictions <- predictions %>% filter(!is.na(flux))
+
+fit_nls_and_calculate_Q10 <- function(flux, temp) {
+  tryCatch({
+    # Create a temporary data frame
+    temp_data <- data.frame(flux = flux, temp = temp)
+    
+    # Fit the non-linear model
+    nls_model <- nls(flux ~ a * exp(b * temp), 
+                     data = temp_data, 
+                     start = list(a = 1, b = 0.1))
+    
+    # Calculate Q10 as exp(10 * b)
+    Q10 <- exp(10 * coef(nls_model)["b"])
+    
+    return(Q10)
+  }, error = function(e) {
+    return(NA)
+  })
+}
+
+# Then use it like this:
+Q10_results <- Reco_Rs_combined_2019 %>%
+  group_by(site) %>%
+  summarize(
+    Q10 = fit_nls_and_calculate_Q10(co2_Rsoil, soilt_avg),
+    min_temp = min(soilt_avg, na.rm = TRUE),
+    max_temp = max(soilt_avg, na.rm = TRUE),
+    min_flux = min(co2_Rsoil, na.rm = TRUE),
+    max_flux = max(co2_Rsoil, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_x = 12.5,  
+    label_y = 25,  
+    label_expr = paste0("Q[10] == ", round(Q10, 2))
+  )
+
+# Print Q10 values
+print(Q10_results)
+
+# Plot the fitted curves and annotate Q10 values with facet_wrap
+ggplot() +
+  # Add the original flux data points
+  geom_point(data = Reco_Rs_combined_2019, 
+             aes(x = soilt_avg, y = co2_Rsoil, color=site, fill=site), 
+             alpha = 0.25) +
+  
+  # Add the fitted lines (model predictions)
+  geom_line(data = predictions, 
+            aes(x = temp, y = flux), 
+            size = 1) +
+  
+  # Add SE shading
+  geom_ribbon(data = predictions, 
+              aes(x = temp, ymin = flux - se, ymax = flux + se), 
+              alpha = 0.2) +
+  
+  # Add text for Q10 values with subscript
+  geom_text(data = Q10_results, 
+            aes(x = label_x, y = label_y, label = label_expr), 
+            size = 4, color = "black", fontface = "bold", parse = TRUE) +
+  
+  # Facet the plot by method
+  facet_wrap(~ site) +
+  
+  theme_classic() +
+  labs(
+    x = "Soil Temperature (10-15cm depth)", 
+    y = "Flux (umol/m²/sec)",
+    title = "2019 Q10 sensitivity: soil respiration"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold")  # Bold facet labels
+  ) +
+  scale_color_manual(values = c("darkred", "forestgreen", "skyblue")) +
+  scale_fill_manual(values = c("darkred", "forestgreen", "skyblue"))+
+  theme(legend.position = "none")+
+  ylab(expression(paste(CO[2], " Flux, ", mu, "mol ", m^-2, s^-1)))+
+  xlab(expression(paste("Soil Temperature ~10-15cm (", degree, "C)")))
+
+```
+
+## 2020, Rs:
+
+```{r}
+# Filter Rsoil to remove two major outliers, isolate to 2019:
+Reco_Rs_combined_2020 <- Reco_Rs_combined %>% 
+  filter(year == 2020)
+
+# Generate a sequence of soil temperatures for predictions
+soiltemp_seq <- seq(
+  min(Reco_Rs_combined_2020$soilt_avg, na.rm = TRUE), 
+  max(Reco_Rs_combined_2020$soilt_avg, na.rm = TRUE), 
+  length.out = 100
+)
+
+# Apply the function across each location to get predictions with SE
+predictions <- Reco_Rs_combined_2020 %>%
+  group_by(site) %>%
+  do(fit_nls_and_predict_with_se(., "co2_Rsoil", "soilt_avg")) %>%
+  ungroup()
+
+# Remove any rows with NA values in the predictions
+predictions <- predictions %>% filter(!is.na(flux))
+
+# Then use it like this:
+Q10_results <- Reco_Rs_combined_2020 %>%
+  group_by(site) %>%
+  summarize(
+    Q10 = fit_nls_and_calculate_Q10(co2_Rsoil, soilt_avg),
+    min_temp = min(soilt_avg, na.rm = TRUE),
+    max_temp = max(soilt_avg, na.rm = TRUE),
+    min_flux = min(co2_Rsoil, na.rm = TRUE),
+    max_flux = max(co2_Rsoil, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_x = 12.5,  
+    label_y = 25,  
+    label_expr = paste0("Q[10] == ", round(Q10, 2))
+  )
+
+# Print Q10 values
+print(Q10_results)
+
+# Plot the fitted curves and annotate Q10 values with facet_wrap
+ggplot() +
+  # Add the original flux data points
+  geom_point(data = Reco_Rs_combined_2020, 
+             aes(x = soilt_avg, y = co2_Rsoil, color=site, fill=site), 
+             alpha = 0.25) +
+  
+  # Add the fitted lines (model predictions)
+  geom_line(data = predictions, 
+            aes(x = temp, y = flux), 
+            size = 1) +
+  
+  # Add SE shading
+  geom_ribbon(data = predictions, 
+              aes(x = temp, ymin = flux - se, ymax = flux + se), 
+              alpha = 0.2) +
+  
+  # Add text for Q10 values with subscript
+  geom_text(data = Q10_results, 
+            aes(x = label_x, y = label_y, label = label_expr), 
+            size = 4, color = "black", fontface = "bold", parse = TRUE) +
+  
+  # Facet the plot by method
+  facet_wrap(~ site) +
+  
+  theme_classic() +
+  labs(
+    x = "Soil Temperature (10-15cm depth)", 
+    y = "Flux (umol/m²/sec)",
+    title = "2020 Q10 sensitivity: soil respiration"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold")  # Bold facet labels
+  ) +
+  scale_color_manual(values = c("darkred", "forestgreen", "skyblue")) +
+  scale_fill_manual(values = c("darkred", "forestgreen", "skyblue"))+
+  theme(legend.position = "none")+
+  ylab(expression(paste(CO[2], " Flux, ", mu, "mol ", m^-2, s^-1)))+
+  xlab(expression(paste("Soil Temperature ~10-15cm (", degree, "C)")))
+
+```
+
+## 2019, R_eco
+
+now for Reco:
+
+```{r}
+# Apply the function across each location to get predictions with SE
+predictions <- Reco_Rs_combined_2019 %>%
+  group_by(site) %>%
+  do(fit_nls_and_predict_with_se(., "co2_Reco", "soilt_avg")) %>%
+  ungroup()
+
+# Remove any rows with NA values in the predictions
+predictions <- predictions %>% filter(!is.na(flux))
+
+# Then use it like this:
+Q10_results <- Reco_Rs_combined_2019 %>%
+  group_by(site) %>%
+  summarize(
+    Q10 = fit_nls_and_calculate_Q10(co2_Reco, soilt_avg),
+    min_temp = min(soilt_avg, na.rm = TRUE),
+    max_temp = max(soilt_avg, na.rm = TRUE),
+    min_flux = min(co2_Reco, na.rm = TRUE),
+    max_flux = max(co2_Reco, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_x = 12.5,  
+    label_y = 25,  
+    label_expr = paste0("Q[10] == ", round(Q10, 2))
+  )
+
+# Print Q10 values
+print(Q10_results)
+
+# Plot the fitted curves and annotate Q10 values with facet_wrap
+ggplot() +
+  # Add the original flux data points
+  geom_point(data = Reco_Rs_combined_2019, 
+             aes(x = soilt_avg, y = co2_Reco, color=site, fill=site), 
+             alpha = 0.25) +
+  
+  # Add the fitted lines (model predictions)
+  geom_line(data = predictions, 
+            aes(x = temp, y = flux), 
+            size = 1) +
+  
+  # Add SE shading
+  geom_ribbon(data = predictions, 
+              aes(x = temp, ymin = flux - se, ymax = flux + se), 
+              alpha = 0.2) +
+  
+  # Add text for Q10 values with subscript
+  geom_text(data = Q10_results, 
+            aes(x = label_x, y = label_y, label = label_expr), 
+            size = 4, color = "black", fontface = "bold", parse = TRUE) +
+  
+  # Facet the plot by method
+  facet_wrap(~ site) +
+  
+  theme_classic() +
+  labs(
+    x = "Soil Temperature (10-15cm depth)", 
+    y = "Flux (umol/m²/sec)",
+    title = "2019 Q10 sensitivity: ecosystem respiration"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold")  # Bold facet labels
+  ) +
+  scale_color_manual(values = c("darkred", "forestgreen", "skyblue")) +
+  scale_fill_manual(values = c("darkred", "forestgreen", "skyblue"))+
+  theme(legend.position = "none")+
+  ylab(expression(paste(CO[2], " Flux, ", mu, "mol ", m^-2, s^-1)))+
+  xlab(expression(paste("Soil Temperature ~10-15cm (", degree, "C)")))
+```
+
+## 2020, R_eco
+
+```{r}
+# Apply the function across each location to get predictions with SE
+predictions <- Reco_Rs_combined_2020 %>%
+  group_by(site) %>%
+  do(fit_nls_and_predict_with_se(., "co2_Reco", "soilt_avg")) %>%
+  ungroup()
+
+# Remove any rows with NA values in the predictions
+predictions <- predictions %>% filter(!is.na(flux))
+
+# Then use it like this:
+Q10_results <- Reco_Rs_combined_2020 %>%
+  group_by(site) %>%
+  summarize(
+    Q10 = fit_nls_and_calculate_Q10(co2_Reco, soilt_avg),
+    min_temp = min(soilt_avg, na.rm = TRUE),
+    max_temp = max(soilt_avg, na.rm = TRUE),
+    min_flux = min(co2_Reco, na.rm = TRUE),
+    max_flux = max(co2_Reco, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    label_x = 12.5,  
+    label_y = 25,  
+    label_expr = paste0("Q[10] == ", round(Q10, 2))
+  )
+
+# Print Q10 values
+print(Q10_results)
+
+# Plot the fitted curves and annotate Q10 values with facet_wrap
+ggplot() +
+  # Add the original flux data points
+  geom_point(data = Reco_Rs_combined_2020, 
+             aes(x = soilt_avg, y = co2_Reco, color=site, fill=site), 
+             alpha = 0.25) +
+  
+  # Add the fitted lines (model predictions)
+  geom_line(data = predictions, 
+            aes(x = temp, y = flux), 
+            size = 1) +
+  
+  # Add SE shading
+  geom_ribbon(data = predictions, 
+              aes(x = temp, ymin = flux - se, ymax = flux + se), 
+              alpha = 0.2) +
+  
+  # Add text for Q10 values with subscript
+  geom_text(data = Q10_results, 
+            aes(x = label_x, y = label_y, label = label_expr), 
+            size = 4, color = "black", fontface = "bold", parse = TRUE) +
+  
+  # Facet the plot by method
+  facet_wrap(~ site) +
+  
+  theme_classic() +
+  labs(
+    x = "Soil Temperature (10-15cm depth)", 
+    y = "Flux (umol/m²/sec)",
+    title = "2020 Q10 sensitivity: ecosystem respiration"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    strip.text = element_text(face = "bold")  # Bold facet labels
+  ) +
+  scale_color_manual(values = c("darkred", "forestgreen", "skyblue")) +
+  scale_fill_manual(values = c("darkred", "forestgreen", "skyblue"))+
+  theme(legend.position = "none")+
+  ylab(expression(paste(CO[2], " Flux, ", mu, "mol ", m^-2, s^-1)))+
+  xlab(expression(paste("Soil Temperature ~10-15cm (", degree, "C)")))
+```
+
+# Comparing cumulative Rs, NEE data (survey) with EC data (tower):
+
+```{r}
+# 7.  \\**Crop Rotation Effects**: Since you have corn/soy rotations, analyze how management effects vary by crop phase. Corn and soy years often show different flux patterns due to differences in biomass production, nitrogen fixation (soy), and residue management. This is particularly important for N₂O fluxes, which often spike during corn years due to nitrogen fertilization in conventional systems.
+# 
+```
+
+# Analysis of Rs/Reco (soil respiration to ecosystem respiration ratio, aka the nighttime NEE values) by system
+
+-   Spring: Higher ratios (limited plant respiration)
+-   Summer: Lower ratios (peak plant respiration)
+-   Fall: Variable (senescence effects)
+-   Winter: Higher ratios (dormant vegetation)
+
+```{r}
+# calculate weekly and/or monthly means to examine seasonal change in Rs/Reco:
+# first, calculate collar daily averages:
+flux_Rs_avg %>% 
+  
+```
+
+# Post-event analysis, comparison of method, comparison of system:
+
+```{r}
+# **Event-Based Analysis**: Focus on management events (tillage, planting, fertilization, harvest) and their immediate flux responses. Chamber measurements can capture short-term, high-frequency events (like N₂O pulses after fertilization) that might be smoothed over in tower data but are crucial for understanding management impacts.
+# **Crop Rotation Effects**: Since you have corn/soy rotations, analyze how management effects vary by crop phase. Corn and soy years often show different flux patterns due to differences in biomass production, nitrogen fixation (soy), and residue management. This is particularly important for N₂O fluxes, which often spike during corn years due to nitrogen fertilization in conventional systems.
+
+```
+
+# Rs/Reco and possible predictive relationship to R_CH4 data across systems
+
+```{r}
+# **Management-Specific Gas Patterns**: organic systems might show different CH₄ patterns depending on manure use and soil conditions. These differences won't appear in your tower CO₂ data but are critical for understanding true management impacts.
+```

@@ -1,0 +1,1007 @@
+---
+title: "eddycovariance_HC"
+author: "Elizabeth Forbes"
+format: html
+editor: visual
+execute:
+  echo: false       # hides code
+  warning: false    # hides warnings
+  message: false    # hides messages
+  error: false      # hides errors (optional, use carefully)
+  output: true     # standard output (like print results)
+---
+
+# Gas exchange across agriculture management strategy
+
+This study examines the differences in average and cumulative greenhouse gas exchange from two different fields located in the Hudson Valley (Columbia County). Both fields are grain fields growing primarily corn and soy, with occasional cover cropping and rotations of barley. The main difference in farming strategy is organic certification, with one field being organic and the other conventionally-operated. However they share many practices, including tillage, fertilizing, cover cropping. However they each have stochastic management events not shared by the other, including herbicide use (conventional) and growing alfalfa hay (organic).
+
+Data were collected from 2018-2022 at two eddy covariance towers equipped with carbon dioxide sensors, one located in each field. Between 2019 and 2020, data were also collected using handheld survey gas exchange units (for both soil respiration and NEP). (Survey data were collected in more years, but these data are not yet cleaned and analyzable.) Other data sources, such as photosynthetically active radiation (PAR); management records; and soil organic matter (SOM) were also collected for subsets of the period during which the towers were deployed and collecting data.
+
+The purposes of these analyses include demonstrating the difference in average and cumulative gas exchange across treatments (organic vs. conventional) using eddy covariance data, augmented and supported by survey data and meta-data where necessary and/or appropriate.
+
+## Libraries
+
+```{r libraries}
+library(tidyverse)
+library(readxl)
+library(readr)
+library(ggpubr)
+library(naniar)
+library(here)
+library(sf) # for reading shape files
+library(purrr)
+library(lubridate)
+library(hms)
+library(ineq) # for Lc function: lorenz curve
+library(ggstance)
+library(visibly)
+library(mgcv) # visualizing gam model results in Dharma
+library(DHARMa)
+library(gratia)
+library(zoo)
+library(epiR)  # For Lin's CCC calculation
+library(GGally)
+library(corrplot)
+library(emmeans)
+library(here)
+```
+
+## Upload cleaned data to global environment
+
+### Eddy covariance, survey, PAR/weather at each tower, and management data:
+
+```{r data_upload}
+#| warning: false
+
+source(here("R scripts", "datacleaning_EC.r"))
+source(here("R scripts", "datacleaning_chambers.r"))
+source(here("R scripts", "datacleaning_PAR_attowers.r"))
+source(here("R scripts", "datacleaning_management.r"))
+
+```
+
+### Add management data to the EC, chamber data:
+
+Using a custom function, calculate several continuous variables for each management action. The custom function is called "merge_management_data_timeseries.r" and is informed by regionally-specific characteristics like the expected crop-specific phenology plus days since management action.
+
+```{r managementdatamerge}
+source("merge_management_data_timeseries_FINAL.r")
+
+ec_daily_mngmnt <- create_management_vars_multicrop(
+  ec_daily_avg,
+  mngmnt) 
+# %>% 
+  ## add binary column of tillage: yes or no? yes = 0 (plotted on x axis), no = NA
+  # mutate(tillage_event = case_when(
+  # days_since_tillage == 0 ~ 0,
+  # TRUE ~ NA))
+
+chamber_daily_mngmnt <- chamber_daily_site %>% 
+  mutate(date = as.Date(date, tz = "EST"))
+chamber_daily_mngmnt <- create_management_vars_multicrop(
+  chamber_daily_mngmnt,
+  mngmnt) %>% 
+  # add binary column for tillage as above
+  mutate(tillage_event = case_when(
+    days_since_tillage == 0 ~ 0, TRUE ~ NA
+  )) %>% 
+  mutate(year = as.numeric(year),
+         month = as.numeric(month))
+
+# write.csv(ec_daily_mngmnt, "ec_daily_mngmnt_esf.csv")
+# write.csv(chamber_daily_mngmnt, "ch_daily_mngmnt_esf.csv")
+
+```
+
+I wrote this initial ec_daily_management df to .csv and made some manual changes to it, based on the management dataset and a line-by-line read to make sure the new continuous and categorical variables accurately reflect it. (see process notes document.) Most of these were done in the CSV file itself. Below, I am uploading the changed document. This involved doing some logic-based assignments of crop stage for the overwintering winter rye cover crop, and the one case of summer rye that overwintered on Kukon in 2020/2021.
+
+```{r manually_edited_management_data}
+ec_daily_mngmnt2 <- read_csv("ec_daily_mngmnt_esf2.csv")
+ec_daily_mngmnt2$date <- mdy(ec_daily_mngmnt2$date)
+
+```
+
+Plot conventional Reco with tillage events:
+
+```{r Reco_withtillageevents_conv}
+
+ec_daily_mngmnt2 %>% 
+  filter(management == "conventional") %>% 
+  ggplot(aes(x=date, y=Reco))+
+  geom_point(alpha = 0.25, color = "red")+
+  geom_line(alpha = 0.25)+
+  geom_point(aes(x=date, y=tillage_event), fill = "blue",
+             size = 4,shape = 21, color = "black", alpha = 0.5)+
+  theme_bw()+
+  ggtitle("Conventional grain field ecosystem respiration with noted tillage events")+
+  ylab(expression(paste("ecosystem respiration, " * mu * "mol m"^-2 * " s"^-1 *"")))+
+  theme(axis.title.x = element_blank(),
+        legend.position = "none")
+```
+
+Plot organic Reco with tillage events
+
+```{r Reco_withtillageevents_org}
+
+ec_daily_mngmnt2 %>% 
+  filter(management == "organic") %>% 
+  ggplot(aes(x=date, y=Reco))+
+  geom_point(alpha = 0.25, color = "darkgreen")+
+  geom_line(alpha = 0.25)+
+  geom_point(aes(x=date, y=tillage_event), fill = "blue", 
+             size = 4,shape = 21, color = "black", alpha = 0.5)+
+  theme_bw()+
+  ggtitle("Organic grain field ecosystem respiration with noted tillage events")+
+  ylab(expression(paste("ecosystem respiration, " * mu * "mol m"^-2 * " s"^-1 *"")))+
+  theme(axis.title.x = element_blank(),
+        legend.position = "none")
+
+```
+
+<!-- ```{r} -->
+
+<!-- ## Add PAR data to the hourly EC data: -->
+
+<!-- ec_hrly_wpar <- ec_hrly_avg %>%  -->
+
+<!--   left_join(pardat_hourly, -->
+
+<!--             by = join_by(management, date, hour)) %>%  -->
+
+<!--   # remove additional (possibly untrustworthy) soil and air temp, rh from PAR dataset -->
+
+<!--   select(!c(soilt_C, airt_C, rh.y)) -->
+
+<!-- # and to daily EC data: -->
+
+<!-- ec_daily_wpar <- ec_daily_avg %>%  -->
+
+<!--   left_join(pardat_dailymax, -->
+
+<!--             by = join_by(management, date)) -->
+
+<!-- ``` -->
+
+# Analyses
+
+## GAM: EC data, daily averages
+
+Assessing daily average trends is useful because it gives mechanistic insight into how gas exchange varies across management types. This analysis tells us when and how management moderates fluxes throughout the seasons we measured.
+
+### NEE
+
+#### GAM model development: daily average
+
+```{r corplots}
+#| warning: false
+
+ec_daily_mngmnt2 %>% 
+  ggpairs(columns = c("VPD", "ndvi", "rh", 
+                      "precip", "airt", "soilt_avg", "vwc_avg", 
+                      "days_since_tillage"),
+          progress = FALSE) # removes extensive printing
+
+# which of these variables co-vary enough to reduce?
+cor_vars <- ec_daily_mngmnt2 %>%
+     select(VPD, ndvi, airt, soilt_avg, vwc_avg, rh, precip, days_since_tillage) %>%
+     na.omit()
+
+cor_matrix <- cor(cor_vars)
+corrplot(cor_matrix, method = "number", type = "upper")
+
+# covarying to a large degree: 
+# air temp and soil temp. Keep soil temp, which is more directly affecting Reco and NEE.
+# toss rh even though it and VPD don't covary (and in face, negatively co-vary by -0.36); it's likely not a hugely important driver and VPD is more mechanistically meaningful for gas exchange
+
+```
+
+Model testing, average NEE over time: simple with main effects, then with different responses by management, then with replacement of NDVI with crop stage to account for phenology. resource on GAMs: https://deepwiki.com/cran/mgcv/2.1-the-gam()-function resource on smoothing and interaction variables: https://deepwiki.com/cran/mgcv/3.1-types-of-smooths
+
+```{r NEE_model}
+library(mgcv)
+
+# make sure management is in factor form
+ec_daily_mngmnt2$management <- factor(as.character(ec_daily_mngmnt2$management))
+# same for crop stage:
+ec_daily_mngmnt2$crop_stage_simple <- factor(
+  ec_daily_mngmnt2$crop_stage_simple,
+  levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "dormant", "fallow")
+)
+
+# examine main effects first
+g1 <- gam(NEE ~ 
+            management +
+            s(year, bs = "re") + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern
+            
+            s(soilt_avg, k = 10) +
+            s(VPD, k = 10) +
+            s(vwc_avg, k = 10) +
+            s(ndvi, k = 10) +
+            # s(precip, k = 8) +
+            s(days_since_tillage, k = 8),
+            # s(days_since_planting, k = 8),
+            
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# allow different responses by management: this is essentially an interaction of management for each term, which makes sense as we might expect each of the variables below to vary with management (soil temp and moisture, greenness, vapor pressure density)
+g2 <- gam(NEE ~ 
+            management +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(ndvi, by = as.factor(management), k = 10) +
+            # s(precip, by = as.factor(management), k = 8) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+            # s(days_since_planting, by = as.factor(management), k = 8),
+            
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# add vwc/soil temp interaction:
+g2.2 <- gam(NEE ~ 
+            management +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern
+            
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(ndvi, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# replace NDVI with crop phase (simple):
+g3 <- gam(NEE ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# replace NDVI with crop phase (simple) plus interaction of vwc and soil temp:
+g3.2 <- gam(NEE ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# add interaction term between crop stage and management:
+g3.3 <- gam(NEE ~ 
+            management * # interaction
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+              
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# compare using AIC values:
+# AIC(g1, g2, g2.2, g3, g3.2, g3.3)
+AIC(g3, g3.2, g3.3)
+
+      #   df       AIC
+# g1	  43.08240	9253.917		
+# g2	  69.64851	8976.697		
+# g2.2	94.44709	8960.476		
+# g3  	60.75865	8302.817		
+# g3.2	81.75316	8291.385		
+# g3.3	91.15208	8271.081			
+```
+
+```{r NEE_gam_eval}
+
+# improvement between 3 and 3.2 (addition of interaction term between soil temp, moisture)
+anova(g3, g3.2, test = "Chisq")
+#   Resid. Df Resid. Dev     Df Deviance Pr(>Chi)
+# 1    1713.4      10308                            
+# 2    1687.9      10004 25.525    304.6 0.001436 **
+
+# improvement between model 3 (no interaction between management and crop stage) and 3.3 (yes interaction)
+anova(g3, g3.3, test = "Chisq")
+#   Resid. Df Resid. Dev     Df Deviance  Pr(>Chi)    
+# 1    1713.4    10308.3                            
+# 2    1676.2     9786.5 37.19   521.85 2.24e-06 ***
+```
+
+Going to use simple crop phase as a categorical response, rather than NDVI as a smoothing response, to investigate the effects of management on the different life stages of the crops across the time series.
+
+```{r NEE_gam_modviz}
+# Check diagnostics of all models with simple crop stage as variable, not NDVI
+# appraise(g3)
+# appraise(g3.2)
+appraise(g3.3)
+# crop stage because it is a simpler variable than NDVI, and is attuned to the different crops being planted in the rotation at a given time, as well as cover cropping.
+```
+
+```{r NEE_gam_output}
+
+plot(g3, pages = 1)
+
+gam.check(g3.3)
+
+summary(g3.3) 
+
+# for parametric terms: a significant coefficient means that the variable has a meaningful linear effect on the response.
+
+# for smoothing terms:
+#   edf (Estimated degrees of freedom): Reflects the complexity of the smooth.
+# Close to 1 means near-linear.
+# Higher values mean more flexible, wiggly functions.
+# F-value and p-value: Tests whether the smooth term significantly improves the model.
+
+# model fit stats:
+# R-sq.(adj) =  0.493   Deviance explained = 51.5%
+# -REML = 4159.7  Scale est. = 5.7482    n = 1781
+
+```
+
+##### Interpretation, linear variables:
+
+Note: baseline comparison to conventional management and mature crop stage (estimated NEE = 0.159)
+
+There is a significant effect of organic management on average daily NEE in the mature crop stage, reducing it by 1.1 units when holding other factors constant; this makes sense, in that we've seen greater drawdown of ecosystem CO2 in the organic field compared to the conventional one when comparing them directly.
+
+There are both trends and significant effects of individual crop stage relative to the baseline estimate (conventional, mature). Compared to the conventional mature, the vegetative stage is slightly higher. Compared to the conventional mature, the grain-fill phase is slightly lower. Compared to the conventional mautre, the fallow phase is significantly higher (1.4 units).
+
+There are also significant interactions between management and crop stage, which are the difference in the crop stage effect between organic and conventional relative to the baseline crop stage; the interaction coefficient therefore tells us how much more or less the difference between that crop stage and the baseline changes under organic compared to conventional management. (To calculate the absolute organic vs. conventional difference in NEE for each crop phase, we'd combine the main effect of organic + the interaction effect of organic on that phase.)
+
+The effect of organic management on the influence of the early crop phase compared to conventional mature is 2.2 units; the effect of organic management on the influence of the vegetative stage compared to conventional mature is 1 unit. The effect of organic management on the influence of the fallow stage compared to conventional mature is 2.7 units.
+
+##### Interpretation, smoothing variables:
+
+Almost every single smoothing factor is significant in driving NEE, with the exception of VWC (soil moisture) in the conventional field, demonstrating the effect of each crop stage. The F-test and p-values indicate with the smooth term explains a meaningful amount of the variation in the model's ability to predict the data. The EDF (estimated degrees of freedom) indicate the complexity of the smoothing term: close to 1 means close to linear, and larger indicates a very 'wiggly' or nonlinear relationship between the smoothing term and NEE.
+
+Seasonality (doy, day of year) has a significant non-linear effect on NEE, capturing expected seasonal variation. The tensor interaction between soil temperature and moisture indicates a significant non-linear effect of the two as they are combined, the extent to which differs by management -- the combined effect is important for NEE, but the estimated complexity of this effect is greater in the organic field than the conventional one. This indicates that there are more nuanced and/or variable effects of this interaction there, perhaps due to more nuanced soil properties, soil microbiome, plant-soil interactions, etc. For soil temp and moisture individually, as well as VPD, the nonlinearity of effect is more pronounced in organic than conventional management, though soil moisture does not significantly moderate NEE in the conventional field at all. Days since tillage are similar.
+
+##### Takeaways:
+
+Organic management creates a tendency toward lower NEE, implying either less CO2 respiration or more uptake via photosynthesis, and/or a combination of the two. Crop stage modifies the effect significantly as well, indicating a different effect of crop stage on NEE depending on management strategy, but overall organic management reduces NEE. The smoothing terms universally indicated nonlinear effects on the organic field's NEE, and almost all except for soil moisture for the conventional field; for the conventional field, the effects were less nonlinear all around.
+
+Interestingly, the random effect of year demonstrates a) that there IS a significant difference in NEE across years, but also that b) these differences are also dependent on management type, indicating that NEE reacts differently to yearly weather patterns, management change, etc., in each field.
+
+##### Visualize:
+
+###### Interactions, NEE daily average:
+
+```{r GAM_NEE_interactionsplot}
+# Create new data frame for prediction
+newdata <- expand.grid(
+  management = c("conventional", "organic"),
+  crop_stage_simple = levels(ec_daily_mngmnt2$crop_stage_simple),
+  year = 2020,          # hold other variables constant at mean or typical values
+  doy = median(ec_daily_mngmnt2$doy),
+  soilt_avg = mean(ec_daily_mngmnt2$soilt_avg),
+  vwc_avg = mean(ec_daily_mngmnt2$vwc_avg),
+  VPD = mean(ec_daily_mngmnt2$VPD, na.rm = TRUE),
+  days_since_tillage = mean(ec_daily_mngmnt2$days_since_tillage, na.rm = TRUE)
+)
+
+# Predict fitted values with standard errors
+pred <- predict(g3.3, newdata, se.fit = TRUE, type = "response")
+
+newdata <- newdata %>%
+  mutate(
+    fit = pred$fit,
+    se = pred$se.fit,
+    lower = fit - 1.96 * se,
+    upper = fit + 1.96 * se
+  )
+
+# Plot predicted NEE by crop stage and management
+ggplot(newdata, aes(x = crop_stage_simple, y = fit, color = management, group = management)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(width = 0.5)) +
+  geom_line(position = position_dodge(width = 0.5), size = 1) +
+  labs(
+    title = "Predicted NEE by Crop Stage and Management Type",
+    x = "Crop Stage",
+    y = "Predicted NEE",
+    color = "Management"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Reco
+
+#### GAM model development: daily average
+
+```{r Reco_model}
+# Again, going with crop phase over NDVI, so skipping that part of model development.
+
+r1 <- gam(Reco ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# plus interaction of vwc and soil temp:
+r1.2 <- gam(Reco ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# add interaction term between crop stage and management:
+r1.3 <- gam(Reco ~ 
+            management * # interaction
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+              
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+AIC(r1, r1.2, r1.3)
+# r1	  70.46897	5430.100		
+# r1.2	92.54523	5392.568		
+# r1.3	98.64308	5312.992	
+
+anova(r1.2, r1.3)
+# 1    1681.9     1926.5                                     
+# 2    1675.8     1830.1 6.1159   96.383 14.658 < 2.2e-16 ***
+
+# same model structure as for daily average NEE
+```
+
+Assess model performance:
+
+```{r Reco_GAM_modviz}
+appraise(r1.3)
+# residuals are distributed normally and the observed values align with the fitted ones
+```
+
+```{r Reco_GAM_output}
+summary(r1.3)
+
+# R-sq.(adj) =  0.866   Deviance explained = 87.2%
+# -REML = 2713.1  Scale est. = 1.0751    n = 1788
+```
+
+##### Interpretation, linear variables:
+
+Note: baseline comparison to conventional management and mature crop stage (estimated Reco = 3.07)
+
+Organic management has a significant effect on Reco baseline (conventional, mature) overall of about 1 unit. The crop stage also has significant effects on Reco -- vegetative, reproductive, and grain fill respectively. The interactions between crop stage and management is also significant, for grain fill and trending that way for dormant. Again, the interaction coefficient tells us how much more or less the difference between that crop stage, and the baseline (mature), changes under organic compared to conventional management
+
+##### Interpretaton, smoothing variables:
+
+all smoothing variables are significant in their effects on Reco, and much like NEE, organic management tends toward more nonlinearity in each variable's effects on Reco.
+
+##### Takeaways:
+
+Again and similar to NEE, organic management has a generally significant effect; in this case, in elevating ecosystem respiration across the board. Under conventional (baseline) management, the vegetative, reproductive, and grain fill stages also show significantly higher Reco, indicating that Reco tends to increase as crops develop and peaks at grain fill. In terms of interactions between management and crop stage, there is evidence that the increase in respiration at grain fill is dampened under organic management compared to the same stage under conventional management; so while respiration increases in organic generally, the 'burst' of respiration that occurs around grain fill is higher in the conventional field than in the organic one. Generally speaking, there are nonlinear and greater-in-complexity smoothing variables that represent edaphic characteristics in the organic field, indicating again greater complexity in the soil environment, microbiome, and/or the plant-soil interactions there.
+
+##### Visualize:
+
+###### Interactions, Reco daily average:
+
+```{r Reco_GAM_interactionsplot}
+
+# Predict fitted values with standard errors
+pred <- predict(r1.3, newdata, se.fit = TRUE, type = "response")
+
+# using same "new data" as above:
+newdata <- newdata %>%
+  mutate(
+    fit = pred$fit,
+    se = pred$se.fit,
+    lower = fit - 1.96 * se,
+    upper = fit + 1.96 * se
+  )
+
+# Plot predicted NEE by crop stage and management
+ggplot(newdata, aes(x = crop_stage_simple, y = fit, color = management, group = management)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(width = 0.5)) +
+  geom_line(position = position_dodge(width = 0.5), size = 1) +
+  labs(
+    title = "Predicted Ecosystem Respiration by Crop Stage and Management Type",
+    x = "Crop Stage",
+    y = "Predicted Ecos. Resp.",
+    color = "Management"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### GPP
+
+#### GAM model development: daily average:
+
+```{r GPPmod_development}
+
+p1 <- gam(GPP_f ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# plus interaction of vwc and soil temp:
+p1.2 <- gam(GPP_f ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+            
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+# add interaction term between crop stage and management:
+p1.3 <- gam(GPP_f ~ 
+            management * # interaction
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(doy, bs = "cc", k = 20) +  # seasonal pattern, cyclical
+              
+            ti(soilt_avg, vwc_avg, by = as.factor(management), k = c(8, 8)) +
+            
+            s(soilt_avg, by = as.factor(management), k = 10) +
+            s(VPD, by = as.factor(management), k = 10) +
+            s(vwc_avg, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = ec_daily_mngmnt2,
+          method = "REML")
+
+AIC(p1, p1.2, p1.3)
+# p1	  64.28674	7953.106		
+# p1.2	84.91324	7923.709		
+# p1.3	91.95485	7912.924		
+
+anova(p1.2, p1.3)
+# 1    1689.6     8003.2                                   
+# 2    1682.4     7892.7 7.1935   110.54 3.3292 0.001412 **
+
+# same model structure as for daily average NEE, daily average Reco
+```
+
+Assess model performance:
+
+```{r}
+appraise(p1.3)
+# residuals are distributed normally and the observed values align with the fitted ones
+```
+
+```{r}
+summary(p1.3)
+
+# R-sq.(adj) =  0.761   Deviance explained = 77.1%
+# -REML =   3983  Scale est. = 4.6156    n = 1788
+```
+
+#### Interpretation, linear variables:
+
+Baseline GPP (mature crop stage, conventional management) estimate: 2.85
+
+Organic management increases GPP by about 1.8 units. Under conventional management, there is a trend toward lower GPP in the early phase compared to mature (makes sense) and significantly higher GPP in the crop fill stage (also makes sense). There is significantly lower GPP in the fallow phase (also expected). Like respiration, GPP peaks in the grain fill stage. Most interaction terms aren't significant, except that between organic management and dormat crop stage, which has a 1.6 unit increase compared to baseline, indicating that GPP is higher in the organic field during dormancy than in the conventional field during dormancy.
+
+#### Interpretation, smoothing variables:
+
+Unlike NEE and Reco, the tensor interaction between soil temp and moisture is significant only for the conventional field, indicating that there is a strong combined influence there but not the organic field. To that end, soil temperature is significant and very complex in the conventional field but not organic, while soil moisture is significant and complex in both fields but more so in the organic field. VPD is significant and nonlinear in the organic field as well, and days since tillage is again significant in both fields but more complex in the organic field.
+
+#### Takeaways:
+
+As for NEE and Reco, organic management is highly significant and results in higher baseline GPP (and thus productivity). GPP is strongly moderated by crop stage, particularly grain fill (peak productivity) and dormant (low). An interesting note is that there is no significant interaction between crop stage and management except for dormancy in the organic field, when dormant cover crops over the winter months have greater GPP than those dormant cover crops in the conventional field.
+
+The conventional field has strong nonlinear effects of soil temperature as well as the interaction between soil temperature and moisture, while the organic field does not; however, the organic field demonstrates more complex effects of the other edaphic drivers on GPP including soil moisture. As predicted and expected, seasonality and year-to-year variation are both significant drivers of GPP in all cases.
+
+#### Visualize:
+
+###### Interactions, GPP daily average:
+
+```{r}
+# Predict fitted values with standard errors
+pred <- predict(p1.3, newdata, se.fit = TRUE, type = "response")
+
+# using same "new data" as above:
+newdata <- newdata %>%
+  mutate(
+    fit = pred$fit,
+    se = pred$se.fit,
+    lower = fit - 1.96 * se,
+    upper = fit + 1.96 * se
+  )
+
+# Plot predicted NEE by crop stage and management
+ggplot(newdata, aes(x = crop_stage_simple, y = fit, color = management, group = management)) +
+  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(width = 0.5)) +
+  geom_line(position = position_dodge(width = 0.5), size = 1) +
+  labs(
+    title = "Predicted Gross Primary Productivity by Crop Stage and Management Type",
+    x = "Crop Stage",
+    y = "Predicted GPP",
+    color = "Management"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+<!-- ## GAM: EC data, yearly cumulative -->
+
+<!-- This analysis allows us to ask whether the systems differ in being a carbon sink or source and get closer to a total carbon budget. This analysis tells us whether the above differences in fluxes across management translate into whole-season differences in carbon balance. -->
+
+## GAM: chamber data, daily averages
+
+```{r}
+# again, added in the cover crop data manually along with the alfalfa data (crop stage).
+chamber_daily_mngmnt2 <- read_csv("ch_daily_mngmnt_esf.csv")
+
+# make sure management is in factor form
+chamber_daily_mngmnt2$management <- factor(as.character(chamber_daily_mngmnt2$management))
+# same for crop stage:
+chamber_daily_mngmnt2$crop_stage_simple <- factor(
+  chamber_daily_mngmnt2$crop_stage_simple,
+  levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "fallow")
+)
+```
+
+#### NEE: daily average
+
+There are significantly fewer observations with the survey chambers, but in general we want to see agreement with the trends we saw in the eddy covariance dataset (at least for the years for which we have concurrent data: 2019 and 2020). Our daily averages are going to be based on two daytime observations, rather than 24hr averages. Thus the NEE and Rs values will be daytime only and perhaps a bit easier to interpret.
+
+```{r}
+#| output = FALSE
+
+# which of these variables co-vary enough to reduce?
+cor_vars <- chamber_daily_mngmnt2 %>%
+     select(airtempC_mean, soilm_perc_mean, spad_mean, NDVI_mean) %>%
+     na.omit()
+
+cor_matrix <- cor(cor_vars)
+corrplot(cor_matrix, method = "number", type = "upper")
+
+# test for correlation between SPAD and/or NDVI and crop stage:
+# ANOVA
+anova_result <- aov(chamber_daily_mngmnt2$spad_mean ~ chamber_daily_mngmnt2$crop_stage_simple)
+summary(anova_result)
+#                                          Df Sum Sq Mean Sq F value   Pr(>F)    
+# chamber_daily_mngmnt2$crop_stage_simple  5   1797   359.4   6.269 0.000144 ***
+# Residuals                               49   2809    57.3                                  
+anova_result <- aov(chamber_daily_mngmnt2$NDVI_mean ~ chamber_daily_mngmnt2$crop_stage_simple)
+summary(anova_result)
+#                                         Df Sum Sq Mean Sq F value   Pr(>F)    
+# chamber_daily_mngmnt2$crop_stage_simple  5  1.546 0.30918   9.463 7.36e-07 ***
+# Residuals                               67  2.189 0.03267                     
+
+# Calculate Eta squared
+library(lsr)  # install.packages("lsr") if needed
+etaSquared(anova_result)
+#                                          eta.sq eta.sq.part
+# chamber_daily_mngmnt$crop_stage_simple 0.390129    0.390129
+# HUGELY correlated for both SPAD and NDVI. We can use crop stage as a way to measure phenology/greenness bc we have a full column of data with no NAs.
+
+```
+
+Model development:
+
+```{r}
+# model 1:
+c1 <- gam(NEE_umolm2sec_mean ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+
+            s(airtempC_mean, by = as.factor(management), k = 10) +
+            s(soilm_perc_mean, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+
+# add interaction term between crop stage and management:
+c2 <- gam(NEE_umolm2sec_mean ~ 
+            management *
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            s(airtempC_mean, by = as.factor(management), k = 10) +
+            s(soilm_perc_mean, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+
+# add tensor interaction between air temp and soil moisture
+c3 <- gam(NEE_umolm2sec_mean ~ 
+            management *
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            ti(soilm_perc_mean, airtempC_mean, by = as.factor(management), k = c(8, 8)) +
+
+            s(airtempC_mean, by = as.factor(management), k = 10) +
+            s(soilm_perc_mean, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+```
+
+```{r}
+# compare using AIC values:
+AIC(c1, c2, c3)
+#         df      AIC
+# c1	18.16276	571.5739		
+# c2	24.89599	567.2237		
+# c3	32.87916	558.5610	
+
+anova(c1, c2)
+#   Resid. Df Resid. Dev    Df Deviance      F  Pr(>F)  
+# 1    79.459     1351.3                                
+# 2    72.437     1126.7 7.022   224.63 2.1514 0.04853 *
+
+anova(c2, c3)
+# 1    72.437    1126.65                                 
+# 2    62.424     876.28 10.013   250.37 1.9923 0.04917 *
+
+# Check diagnostics of final model:
+appraise(c3) #looks pretty good
+```
+
+```{r}
+summary(c3)
+```
+
+##### Interpretation:
+
+While there is no significant effect of management on chamber-based daily average NEE, there it is clear that both crop stage (reproductive, grain fill) both reduce NEE when compared to the baseline of conventional, mature crop by quite a bit. Additionally, the interaction between management and crop stage is significant, with enhanced effects of early, vegetative, reproductive, and grain fill stages on NEE in the organic field compared to the conventional one.
+
+The only smoothing factors that are significant in driving NEE are days since tillage, though the effect is much more complex in the organic field than the conventional one.
+
+##### Takeaways:
+
+These results largely align with those data collected from the EC towers, reinforcing the conclusions that organic management generally reduces NEE but that this effect varies by crop stage. The drivers of the effect are much less linear / more complex in the organic field compared to the conventional one.
+
+##### Visualize:
+
+###### Predicted Through Crop Stage:
+
+```{r}
+# Create prediction data
+pred_data <- expand.grid(
+  crop_stage_simple = factor(c("mature", "early", "vegetative", "reproductive", 
+                                "grain_fill", "fallow")),
+  management = factor(c("conventional", "organic")),
+  # Hold other variables at representative values
+  year = median(chamber_daily_mngmnt2$year),
+  month = median(chamber_daily_mngmnt2$month),
+  airtempC_mean = mean(median(chamber_daily_mngmnt2$airtempC_mean), na.rm = TRUE),
+  soilm_perc_mean = mean(chamber_daily_mngmnt2$soilm_perc_mean, na.rm = TRUE),
+  days_since_tillage = mean(chamber_daily_mngmnt2$days_since_tillage, na.rm = TRUE)
+)
+
+# Get predictions with confidence intervals
+pred_data$fit <- predict(c3, newdata = pred_data, se.fit = TRUE)$fit
+pred_data$se <- predict(c3, newdata = pred_data, se.fit = TRUE)$se.fit
+
+# Plot
+ggplot(pred_data, aes(x = crop_stage_simple, y = fit, 
+                      color = management, group = management)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = fit - 1.96*se, ymax = fit + 1.96*se, 
+                  fill = management), alpha = 0.2) +
+  geom_point(size = 3) +
+  labs(title = "NEE Through Crop Development",
+       x = "Crop Stage", y = "predicted NEE") +
+  theme_bw()
+```
+
+###### Predicted vs. Observed
+
+```{r}
+# Add predictions to original data
+chamber_daily_mngmnt2$predictedNEE <- predict(c3)
+
+chamber_daily_mngmnt2 %>% 
+  ggplot(aes(x = predictedNEE, y = NEE_umolm2sec_mean)) +
+  geom_point(aes(color = management, shape = crop_stage_simple), 
+             alpha = 0.75, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~management) +
+  labs(title = "GAM Model Fit: Observed vs. Predicted NEE",
+       x = "Predicted NEE",
+       y = "Observed NEE") +
+  theme_bw()
+```
+
+### Reco: daily average
+
+```{r}
+# simple:
+n1 <- gam(Rs_umolm2sec_mean ~ 
+            management +
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            s(soilm_perc_mean, k = 10, by = as.factor(management)) +
+            s(airtempC_mean, k = 10, by = as.factor(management)) +
+            s(days_since_tillage, k = 8, by = as.factor(management)),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+
+# with interaction of management and crop stage:
+n2 <- gam(Rs_umolm2sec_mean ~ 
+            management *
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            s(soilm_perc_mean, k = 10, by = as.factor(management)) +
+            s(airtempC_mean, k = 10, by = as.factor(management)) +
+            s(days_since_tillage, k = 8, by = as.factor(management)),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+
+# add tensor interaction between soil moisture and air temp:
+n3 <- gam(Rs_umolm2sec_mean ~ 
+            management *
+            crop_stage_simple +
+            s(year, bs = "re", by = as.factor(management)) + # random effect of year
+            s(month, bs = "cc", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            ti(soilm_perc_mean, airtempC_mean, by = as.factor(management), k = c(8, 8)) +
+         
+            s(soilm_perc_mean, k = 10, by = as.factor(management)) +
+            s(airtempC_mean, k = 10, by = as.factor(management)) +
+            s(days_since_tillage, k = 8, by = as.factor(management)),
+
+          data = chamber_daily_mngmnt2,
+          method = "REML")
+
+AIC(n1, n2, n3)
+#       df        AIC
+# n1	25.25305	538.8713		
+# n2	29.72541	507.1832		
+# n3	33.21324	508.7876	
+
+anova(n1, n2)
+#   Resid. Df Resid. Dev     Df Deviance      F    Pr(>F)    
+# 1    72.239     837.49                                     
+# 2    67.726     553.24 4.5126   284.25 8.0638 1.034e-05 ***
+
+anova(n2, n3)
+#   Resid. Df Resid. Dev     Df Deviance     F Pr(>F)
+# 1    67.726     553.24                             
+# 2    63.401     523.73 4.3252   29.506 0.888 0.4828
+
+# going to keep the tensor interaction because the logic holds for this analysis as well as for the others: there is a likelihood of the air temp (in lieu of soil temp, here) co-varying with soil moisture in a way that is interactive, even if the model comparison shows a slightly higher AIC.  The difference is extremely slight, and model n3 explains a significant amount of the variance in the dataset (84.8% in n3 versus 85% in n2).
+```
+
+```{r}
+appraise(n3) #looks good
+```
+
+```{r}
+summary(n3)
+```
+
+##### Interpretation:
+
+Again, management does not have a clear significant effect when holding all else equal. However, crop stage once again indicates differences in ecosystem respiration with fallow having significantly higher respiration when compared to conventional mature, and grain fill indicating higher respiration as well. The interaction between management and crop stage is significant for the reproductive and grain fill stages, indicating a much lower respiration rate in these stages when compared to conventional mature.
+
+As for chamber-based NEE, chamber-based ecosystem respiraiton is significantly moderated by days since tillage and once again, the effect is far more complex for the organic field than the conventional field. In addition, the organic field has a significant effect of air temperature, which is fairly linear in its positive effect, and seasonality (here, month) indicates a slightly positive effect in the organic field as well.
+
+##### Takeaways:
+
+Again this analysis largely supports the conclusions from the EC tower data, and days since tillage seems to be the most prominent smoothing variable in both fields that emerges from the "all smooths are significant" outcomes of the tower data, in terms of moderating both NEE and ecosystem respiration on the scale of the collars.
+
+##### Visualize:
+
+###### Predicted Through Crop Stage:
+
+```{r}
+# Use existing prediction data
+
+# Get predictions with confidence intervals
+pred_data$fit <- predict(n3, newdata = pred_data, se.fit = TRUE)$fit
+pred_data$se <- predict(n3, newdata = pred_data, se.fit = TRUE)$se.fit
+
+# Plot
+ggplot(pred_data, aes(x = crop_stage_simple, y = fit, 
+                      color = management, group = management)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = fit - 1.96*se, ymax = fit + 1.96*se, 
+                  fill = management), alpha = 0.2) +
+  geom_point(size = 3) +
+  labs(title = "Respiration Through Crop Development",
+       x = "Crop Stage", y = "Predicted R_s") +
+  theme_bw()
+```
+
+###### Predicted vs. Observed
+
+```{r}
+# Add predictions to original data
+chamber_daily_mngmnt2$predictedRs <- predict(n3)
+
+chamber_daily_mngmnt2 %>% 
+  ggplot(aes(x = predictedRs, y = Rs_umolm2sec_mean)) +
+  geom_point(aes(color = management, shape = crop_stage_simple), 
+             alpha = 0.75, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  facet_wrap(~management) +
+  labs(title = "GAM Model Fit: Observed vs. Predicted Respiration",
+       x = "Predicted Rs",
+       y = "Observed Rs") +
+  theme_bw()
+```

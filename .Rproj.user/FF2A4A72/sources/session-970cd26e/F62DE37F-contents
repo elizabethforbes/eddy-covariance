@@ -1,0 +1,431 @@
+---
+title: "Eddy Covariance: Resilience to Weather"
+author: "Elizabeth Forbes"
+format: html
+editor: visual
+execute:
+  echo: false       # hides code
+  warning: false    # hides warnings
+  message: false    # hides messages
+  error: false      # hides errors (optional, use carefully)
+  output: true     # standard output (like print results)
+---
+
+This analysis differs from the main analysis in that it examines specifically the resilience of each field's patterns of gas exchange in response to certain year-specific weather events. The question here: does organic management buffer stress responses to drought?
+
+## Libraries:
+
+```{r libraries}
+library(tidyverse)
+library(readxl)
+library(readr)
+library(ggpubr)
+library(naniar)
+library(here)
+library(sf) # for reading shape files
+library(purrr)
+library(lubridate)
+library(hms)
+library(ineq) # for Lc function: lorenz curve
+library(ggstance)
+library(visibly)
+library(mgcv) # visualizing gam model results in Dharma
+library(DHARMa)
+library(gratia)
+library(zoo)
+library(epiR)  # For Lin's CCC calculation
+library(GGally)
+library(corrplot)
+library(emmeans)
+```
+
+## Data:
+```{r}
+ec_daily_mngmnt2 <- read_csv("ec_daily_mngmnt_esf2.csv")
+ec_daily_mngmnt2$date <- mdy(ec_daily_mngmnt2$date)
+# make sure management is in factor form
+ec_daily_mngmnt2$management <- factor(as.character(ec_daily_mngmnt2$management))
+# same for crop stage:
+ec_daily_mngmnt2$crop_stage_simple <- factor(
+  ec_daily_mngmnt2$crop_stage_simple,
+  levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "dormant", "fallow")
+)
+ec_daily_mngmnt2$year <- as.factor(ec_daily_mngmnt2$year)
+```
+
+## Define stress threshold using VPD (vapor pressure density) data:
+```{r}
+# use quantile function to find upper and lower quantiles of each VPD and average soil moisture (VWC), determine if there exists drought stress based on if a line has both higher than average VPD and lower than average VWC: 
+ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>%
+  mutate(
+    drought_stress = VPD > quantile(VPD, 0.75, na.rm = TRUE) & 
+                     vwc_avg < quantile(vwc_avg, 0.25, na.rm = TRUE)
+  )
+```
+
+## Model NEE with stress indicator:
+```{r}
+g_resilience <- gam(NEE ~ 
+                    management * crop_stage_simple * drought_stress +
+                      
+                    s(year, bs = "re", by = management) +
+                    s(doy, bs = "cc", k = 20) +
+                    
+                      ti(soilt_avg, vwc_avg, by = management) +
+                    
+                      s(VPD, by = management) +
+                    
+                      s(soilt_avg, by = management),
+                  data = ec_daily_mngmnt2,
+                  method = "REML")
+
+appraise(g_resilience)
+summary(g_resilience)
+```
+
+## Test hypothesis: Organic has advantage in NEE response during drought
+```{r}
+emm <- emmeans(g_resilience, ~ management | drought_stress | crop_stage_simple)
+contrast(emm, method = "pairwise")  # Is organic advantage BIGGER during drought?
+
+```
+
+## Visualize mechanism:
+```{r}
+
+#find Q1, Q3, and interquartile range for values in points column
+# Calculate IQR boundaries for y
+iqr_bounds <- ec_daily_mngmnt2 %>%
+  group_by(management) %>% 
+  summarise(
+    Q1 = quantile(VPD, 0.25, na.rm = TRUE),
+    Q3 = quantile(VPD, 0.75, na.rm = TRUE)
+  )
+# alts for ggplot purposes:
+vpd_low <- quantile(ec_daily_mngmnt2$VPD, .25, na.rm = TRUE)
+vpd_threshold <- quantile(ec_daily_mngmnt2$VPD, .75, na.rm = TRUE)
+IQR <- IQR(ec_daily_mngmnt2$VPD, na.rm = TRUE)
+# subset the threshold for outliers: those > threshold + 1.5*IQR
+outlierpoint <- ec_daily_mngmnt2 %>% 
+  select(VPD) %>% 
+  filter(VPD > (vpd_threshold + 1.5*IQR)) %>% 
+  min()
+
+# Create prediction grid across VPD gradient for each management
+pred_grid <- expand.grid(
+  VPD = seq(min(ec_daily_mngmnt2$VPD, na.rm = TRUE),
+            max(ec_daily_mngmnt2$VPD, na.rm = TRUE),
+            length.out = 100),
+  management = c("conventional", "organic"),
+  crop_stage_simple = "vegetative",  # Hold at key stage
+  drought_stress = FALSE, # this will be overridden by VPD value
+  # Set other variables at median
+  soilt_avg = median(ec_daily_mngmnt2$soilt_avg, na.rm = TRUE),
+  vwc_avg = median(ec_daily_mngmnt2$vwc_avg, na.rm = TRUE),
+  doy = 200,  # Mid-season
+  days_since_tillage = 30,
+  year = as.factor("2019")
+)
+
+# Get predictions
+pred_grid$NEE <- predict(g_resilience, newdata = pred_grid)
+
+# Calculate management difference across VPD gradient
+difference_curve <- pred_grid %>%
+  pivot_wider(names_from = management, values_from = NEE) %>%
+  mutate(difference = organic - conventional)
+
+# Plot both management systems' NEE across VPD gradient
+ggplot(pred_grid, aes(x = VPD, y = NEE, color = management)) +
+  geom_line(size = 1.2) +
+  geom_point()+
+  geom_hline(yintercept = 0, linetype = "solid") +
+  # ribbon showing IQR of the vapor pressure density:
+  # geom_ribbon(data = iqr_bounds,
+  #   aes(xmin = Q1, 
+  #       xmax = Q3, 
+  #       fill = management),
+  #   alpha = 0.4,
+  #   inherit.aes = FALSE)+
+  scale_color_manual(values = c("conventional" = "#E69F00", "organic" = "#009E73")) +
+  # vertical dotted line showing where the outlier point for VPD is:
+  geom_vline(xintercept = outlierpoint, linetype = "dashed", color = "red") +
+  labs(title = "NEE Response to VPD Gradient",
+       subtitle = "More negative = greater carbon uptake",
+       x = "VPD (Pa)",
+       y = expression(paste("NEE, " * mu * "mol CO"[2] * " m"^-2 * " s"^-1 *"")),
+       color = "Management") +
+  theme_bw()
+```
+## Identify drought years
+```{r}
+year_characteristics <- ec_daily_mngmnt2 %>%
+  group_by(year) %>%
+  summarise(
+    # VPD metrics
+    mean_VPD = mean(VPD, na.rm = TRUE),
+    median_VPD = median(VPD, na.rm = TRUE),
+    max_VPD = max(VPD, na.rm = TRUE),
+    sd_VPD = sd(VPD, na.rm = TRUE),
+    
+    # Drought stress metrics
+    n_high_vpd_days = sum(VPD > quantile(VPD, 0.75, na.rm = TRUE), na.rm = TRUE),
+    pct_high_vpd = round(100 * n_high_vpd_days / n(), 1),
+    
+    # Soil moisture
+    mean_vwc = mean(vwc_avg, na.rm = TRUE),
+    median_vwc = median(vwc_avg, na.rm = TRUE),
+    
+    # Precipitation
+    total_precip = sum(precip, na.rm = TRUE),
+    mean_precip = mean(precip, na.rm = TRUE),
+    
+    # Temperature
+    mean_soilt = mean(soilt_avg, na.rm = TRUE),
+    mean_airt = mean(airt, na.rm = TRUE),
+    
+    # Data quality
+    n_days = n(),
+    n_NEE_obs = sum(!is.na(NEE)),
+    
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_VPD)) %>%
+  mutate(
+    drought_year = mean_VPD > median(mean_VPD),  # Simple classification
+    year_type = ifelse(drought_year, "Drought", "Normal")
+  )
+
+# drought years where mean VPD > median VPD = 2019, 2020
+```
+
+```{r}
+# Create Predictions Across VPD Gradient for Each Year
+year_medians <- ec_daily_mngmnt2 %>%
+  group_by(year, management) %>%
+  summarise(
+    median_soilt = median(soilt_avg, na.rm = TRUE),
+    median_vwc = median(vwc_avg, na.rm = TRUE),
+    median_doy = median(doy, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+pred_by_year_specific <- expand.grid(
+  VPD = seq(min(ec_daily_mngmnt2$VPD, na.rm = TRUE),
+            max(ec_daily_mngmnt2$VPD, na.rm = TRUE),
+            length.out = 100),
+  year = factor(unique(ec_daily_mngmnt2$year)),
+  management = c("conventional", "organic")
+) %>%
+  left_join(year_medians, by = c("year", "management")) %>%
+  mutate(
+    crop_stage_simple = factor("vegetative"),
+    drought_stress = FALSE,
+    soilt_avg = median_soilt,
+    vwc_avg = median_vwc,
+    doy = median_doy,
+    days_since_tillage = 30
+  )
+
+preds_specific <- predict(g_resilience, newdata = pred_by_year_specific, se.fit = TRUE)
+pred_by_year_specific$NEE <- preds_specific$fit
+pred_by_year_specific$se <- preds_specific$se.fit
+pred_by_year_specific$lower <- pred_by_year_specific$NEE - 1.96 * pred_by_year_specific$se
+pred_by_year_specific$upper <- pred_by_year_specific$NEE + 1.96 * pred_by_year_specific$se
+```
+
+```{r}
+# Calculate Management Differences for Each Year
+difference_by_year_specific <- pred_by_year_specific %>%
+  select(VPD, year, management, NEE, se) %>%
+  pivot_wider(names_from = management, 
+              values_from = c(NEE, se)) %>%
+  mutate(
+    difference = NEE_organic - NEE_conventional,
+    difference_flipped = -1 * difference,
+    se_diff = sqrt(se_organic^2 + se_conventional^2),
+    lower_diff = difference_flipped - 1.96 * se_diff,
+    upper_diff = difference_flipped + 1.96 * se_diff
+  ) %>%
+  left_join(year_characteristics %>% select(year, year_type, mean_VPD), 
+            by = "year")
+```
+
+```{r}
+# yearly summary stats:
+year_effects_summary <- difference_by_year_specific %>%
+  group_by(year, year_type, mean_VPD) %>%
+  summarise(
+    max_org_advantage = max(difference_flipped, na.rm = TRUE),
+    min_org_advantage = min(difference_flipped, na.rm = TRUE),
+    avg_org_advantage = mean(difference_flipped, na.rm = TRUE),
+    vpd_at_max_advantage = VPD[which.max(difference_flipped)],
+    vpd_at_min_advantage = VPD[which.min(difference_flipped)],
+    range_org_advantage = max_org_advantage - min_org_advantage,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_VPD))
+
+```
+
+```{r}
+# PLOT 1: NEE Response Curves by Year (Year-Specific Conditions)
+# Shows actual predicted NEE for each management system in each year
+
+ggplot(pred_by_year_specific, aes(x = VPD, y = NEE, color = management)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = management),
+              alpha = 0.2, color = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  facet_wrap(~ year, ncol = 2) +
+  scale_color_manual(values = c("conventional" = "#E69F00", "organic" = "#009E73")) +
+  scale_fill_manual(values = c("conventional" = "#E69F00", "organic" = "#009E73")) +
+  labs(title = "NEE Response to VPD by Year",
+       subtitle = "Year-specific soil conditions | More negative = greater carbon uptake",
+       x = "VPD (Pa)",
+       y = expression(paste("NEE, " * mu * "mol CO"[2] * " m"^-2 * " s"^-1 *"")),
+       color = "Management",
+       fill = "Management") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+```{r}
+# PLOT 2: Management Difference by Year
+# Shows organic advantage/disadvantage across VPD for each year
+
+ggplot(difference_by_year_specific, 
+             aes(x = VPD, y = difference_flipped)) +
+  geom_ribbon(aes(ymin = lower_diff, ymax = upper_diff),
+              alpha = 0.3, fill = "steelblue") +
+  geom_line(size = 1.2, color = "darkblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  facet_wrap(~ year, ncol = 2) +
+  labs(title = "Organic Carbon Uptake Advantage by Year",
+       subtitle = "Positive = organic has greater carbon uptake | Shaded = 95% CI",
+       x = "VPD (Pa)",
+       y = expression(paste(Delta*"NEE")))+
+  theme_bw(base_size = 12)
+```
+```{r}
+# PLOT 4: Comparison of Drought vs. Normal Years (Averaged)
+# Groups years into drought vs. normal and shows average pattern
+
+avg_by_year_type <- difference_by_year_specific %>%
+  group_by(VPD, year_type) %>%
+  summarise(
+    mean_diff = mean(difference_flipped, na.rm = TRUE),
+    se_diff = sd(difference_flipped, na.rm = TRUE) / sqrt(n()),
+    lower = mean_diff - 1.96 * se_diff,
+    upper = mean_diff + 1.96 * se_diff,
+    .groups = "drop"
+  )
+
+ggplot(avg_by_year_type, aes(x = VPD, y = mean_diff, color = year_type)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = year_type),
+              alpha = 0.2, color = NA) +
+  geom_line(size = 1.5) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("Drought" = "#D55E00", "Normal" = "#0072B2")) +
+  scale_fill_manual(values = c("Drought" = "#D55E00", "Normal" = "#0072B2")) +
+  labs(title = "Organic Advantage: Drought vs. Normal Years",
+       subtitle = "Average pattern across year types",
+       x = "VPD (Pa)",
+       y = expression(paste("Organic C uptake advantage, " * mu * "mol CO"[2] * " m"^-2 * " s"^-1 *"")),
+       color = "Year Type",
+       fill = "Year Type") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+```
+```{r}
+# PLOT 5: Add Observed Data Points
+# Show where each year actually fell on the VPD gradient
+
+observed_summary <- ec_daily_mngmnt2 %>%
+  filter(!is.na(NEE)) %>%
+  group_by(year, management) %>%
+  summarise(
+    mean_VPD = mean(VPD, na.rm = TRUE),
+    mean_NEE = mean(NEE, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(year_characteristics %>% select(year, year_type), by = "year")
+
+ggplot(pred_by_year_specific, aes(x = VPD, y = NEE, color = management)) +
+  geom_line(size = 1, alpha = 0.7) +
+  geom_point(data = observed_summary, 
+             aes(x = mean_VPD, y = mean_NEE, shape = year_type),
+             size = 5, stroke = 1.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  facet_wrap(~ year, ncol = 2) +
+  scale_color_manual(values = c("conventional" = "#E69F00", "organic" = "#009E73")) +
+  scale_shape_manual(values = c("Drought" = 17, "Normal" = 16)) +
+  labs(title = "NEE Response to VPD with Observed Year Means",
+       subtitle = "Lines = model predictions | Points = actual year mean",
+       x = "VPD (Pa)",
+       y = expression(paste("NEE, " * mu * "mol CO"[2] * " m"^-2 * " s"^-1 *"")),
+       color = "Management",
+       shape = "Year Type") +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+```{r}
+# PLOT 6: Summary Figure - Key Metrics by Year
+# Bar plot showing max advantage, min advantage, etc.
+
+year_effects_sum_long <- 
+  year_effects_summary %>%
+  select(year, year_type, max_org_advantage, min_org_advantage, avg_org_advantage) %>%
+  pivot_longer(cols = c(max_org_advantage, min_org_advantage, avg_org_advantage),
+               names_to = "metric", values_to = "value") %>%
+  mutate(metric = factor(metric, 
+                         levels = c("max_org_advantage", "avg_org_advantage", "min_org_advantage"),
+                         labels = c("Max Advantage", "Average", "Max Disadvantage")))
+year_effects_sum_long %>% 
+  filter(metric == "Average") %>% 
+  ggplot(aes(x = year, y = value, fill = year_type)) +
+  geom_col(position = "dodge") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  # facet_wrap(~ year_type, scales = "free_x") +
+  # scale_fill_brewer(palette = "Set2") +
+  scale_color_manual(values = c("Drought" = "#D55E00", "Normal" = "#0072B2")) +
+  scale_fill_manual(values = c("Drought" = "#D55E00", "Normal" = "#0072B2")) +  
+  labs(title = "Summary of Organic Advantage Across VPD Range by Year",
+       x = "Year",
+       y = expression(paste("Organic Advantage, " * mu * "mol CO"[2] * " m"^-2 * " s"^-1 *"")),
+       fill = "Metric") +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+## Simple t-test comparison
+```{r}
+# Test: Is organic advantage different in drought vs. normal years?
+# At high VPD (>75th percentile)
+
+high_vpd_threshold <- quantile(ec_daily_mngmnt2$VPD, 0.75, na.rm = TRUE)
+
+high_vpd_comparison <- difference_by_year_specific %>%
+  filter(VPD > high_vpd_threshold)
+#   group_by(year, year_type) %>%
+#   summarise(
+#     mean_advantage = mean(difference_flipped, na.rm = TRUE),
+#     .groups = "drop"
+#   )
+```
+
+
+```{r}
+# Simple t-test: for those instances of high VPD, or VPD over the 75th quantile:
+# Hypothesis 1: the mean difference in NEE between organic and conventional is greater in drought years than non-drought years.
+t.test(difference_flipped ~ year_type, data = high_vpd_comparison)
+# mean in group Drought  mean in group Normal 
+#             2.2886807             0.8195983 
+# t = 4.9727, df = 457.22, p-value = 9.356e-07
+
+# Hypothesis 2: for those instances of high VPD, the mean difference in NEE between organic and conventional is greater in drought years compared to non-drought years.
+t.test(difference_flipped ~ year_type, data = difference_by_year_specific)
+# mean in group Drought  mean in group Normal 
+#             2.2886807             0.8195983 
+# t = 4.9727, df = 457.22, p-value = 9.356e-07
+
+```
+

@@ -1,0 +1,19 @@
+"0","# add tensor interaction between air temp and soil moisture
+c3 <- gam(NEE_umolm2sec_mean ~ 
+            management *
+            crop_stage_simple +
+            s(year, bs = ""re"", by = as.factor(management)) + # random effect of year
+            s(month, bs = ""cc"", k = 6, by = as.factor(management)) +  # seasonal pattern
+            
+            ti(soilm_perc_mean, airtempC_mean, by = as.factor(management), k = c(8, 8)) +
+
+            s(airtempC_mean, by = as.factor(management), k = 10) +
+            s(soilm_perc_mean, by = as.factor(management), k = 10) +
+            s(days_since_tillage, by = as.factor(management), k = 8),
+
+          data = chamber_daily_mngmnt2,
+          method = ""REML"")
+"
+"2","Error in eval(mf, parent.frame()) : 
+  object 'chamber_daily_mngmnt2' not found
+"

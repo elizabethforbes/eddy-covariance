@@ -1,0 +1,13 @@
+"0","chamber_daily_mngmnt <- create_management_vars_multicrop(
+  chamber_daily_mngmnt,
+  mngmnt) %>% 
+  # add binary column for tillage as above
+  mutate(tillage_event = case_when(
+    days_since_tillage == 0 ~ 0, TRUE ~ NA
+  )) %>% 
+  mutate(year = as.numeric(year),
+         month = as.numeric(month))
+"
+"2","Error in create_management_vars_multicrop(chamber_daily_mngmnt, mngmnt) : 
+  could not find function ""create_management_vars_multicrop""
+"

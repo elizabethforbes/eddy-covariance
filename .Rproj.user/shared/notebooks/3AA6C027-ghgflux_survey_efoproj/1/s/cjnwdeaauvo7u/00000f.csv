@@ -1,0 +1,43 @@
+"0","#   ggplot(aes(x = as.factor(month), y = value, fill = site))+
+#   geom_boxplot()+
+#   geom_jitter(color = ""red"", alpha = 0.2, size = 0.1)+
+#   scale_fill_discrete(name = ""management:"", labels = c(""regenerative corn"", ""conventional corn"", ""organic dairy pasture""))+
+#   labs(x = ""month"",
+#        y = element_blank())+
+#   facet_grid(environ_var~ year, 
+#              scales = ""free"",
+#              labeller = labeller(environ_var = var_labels))+ # Add labeller here
+#   theme_bw()
+NEE_site_daily %>% # NEE data include spad and NDVI
+  filter(site != ""CS04"") %>% 
+  filter(site != ""EF03"") %>% 
+  replace_with_na_at(.vars = ""NDVI_mean"",
+                     condition = ~.x > 1) %>% # remove spurious NDVI values
+  gather(-site, 
+         -month, 
+         -date, 
+         -year, 
+         key = ""environ_var"", value = ""value"",
+         ) %>% 
+  # deselect variables we don't need:
+  select(-c(n_collars,
+            CO2_NEE_daily_mean,CO2_NEE_daily_se,
+            CH4_NEE_daily_mean, CH4_NEE_daily_se)) %>%
+  ggplot(aes(x = as.factor(month), y = value, fill = site))+
+  geom_boxplot()+
+  geom_jitter(color = ""red"", alpha = 0.2, size = 0.1)+
+  scale_fill_discrete(name = ""management:"", 
+                      labels = c(""regenerative corn"", 
+                                 ""conventional corn"", ""organic dairy pasture""))+
+  labs(x = ""month"",
+       y = element_blank())+
+  facet_grid(environ_var~ year, 
+             scales = ""free"",
+             labeller = labeller(environ_var = var_labels))+ # Add labeller here
+  theme_bw()
+"
+"1","[1m[33mError[39m in `select()`:[22m
+[33m![39m Can't select columns that don't exist.
+[31m✖[39m Column `n_collars` doesn't exist.
+[90mRun `]8;;x-r-run:rlang::last_trace()rlang::last_trace()]8;;` to see where the error occurred.[39m
+"

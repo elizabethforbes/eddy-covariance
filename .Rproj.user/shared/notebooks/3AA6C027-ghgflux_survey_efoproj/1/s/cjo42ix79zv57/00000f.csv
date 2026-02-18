@@ -1,0 +1,15 @@
+"0","# Step 1: combine eddy covariance, survey data for when the date/time matches (by hourly average for 2019, 2020)
+ec_daily_avg <- all_ec_filtered %>% 
+  mutate(soilt_avg = mean(soilt1, soilt2),
+         vwc_avg = mean(vwc1, vwc2)) %>% 
+  select(!c(soilt1, soilt2, vwc1, vwc2)) %>% 
+  group_by(date, hour) %>% 
+  summarise_if(is.numeric, mean, na.rm = TRUE) %>% 
+  ungroup()
+"
+"1","[1m[33mError[39m in `mutate()`:[22m
+[38;5;232m[36mℹ[38;5;232m In argument: `soilt_avg = mean(soilt1, soilt2)`.[39m
+[1mCaused by error in `mean.default()`:[22m
+[33m![39m 'trim' must be numeric of length one
+[90mRun `]8;;x-r-run:rlang::last_trace()rlang::last_trace()]8;;` to see where the error occurred.[39m
+"

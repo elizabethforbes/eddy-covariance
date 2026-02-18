@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.3.450">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Elizabeth Forbes">
+
+<title>eddycovariance_HC</title>
+<style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="eddycovariance_HC_Woodwell_files/libs/clipboard/clipboard.min.js"></script>
+<script src="eddycovariance_HC_Woodwell_files/libs/quarto-html/quarto.js"></script>
+<script src="eddycovariance_HC_Woodwell_files/libs/quarto-html/popper.min.js"></script>
+<script src="eddycovariance_HC_Woodwell_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="eddycovariance_HC_Woodwell_files/libs/quarto-html/anchor.min.js"></script>
+<link href="eddycovariance_HC_Woodwell_files/libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="eddycovariance_HC_Woodwell_files/libs/quarto-html/quarto-syntax-highlighting.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="eddycovariance_HC_Woodwell_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="eddycovariance_HC_Woodwell_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="eddycovariance_HC_Woodwell_files/libs/bootstrap/bootstrap.min.css" rel="stylesheet" id="quarto-bootstrap" data-mode="light">
+
+
+</head>
+
+<body class="fullcontent">
+
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">eddycovariance_HC</h1>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Elizabeth Forbes </p>
+          </div>
+  </div>
+    
+  
+    
+  </div>
+  
+
+</header>
+
+<section id="gas-exchange-across-agriculture-management-strategy" class="level1">
+<h1>Gas exchange across agriculture management strategy</h1>
+<p>This study examines the differences in average and cumulative greenhouse gas exchange from two different fields located in the Hudson Valley (Columbia County). Both fields are grain fields growing primarily corn and soy, with occasional cover cropping and rotations of barley. The main difference in farming strategy is organic certification, with one field being organic and the other conventionally-operated. However they share many practices, including tillage, fertilizing, cover cropping. However they each have stochastic management events not shared by the other, including herbicide use (conventional) and growing alfalfa hay (organic).</p>
+<p>Data were collected from 2018-2022 at two eddy covariance towers equipped with carbon dioxide sensors, one located in each field. Between 2019 and 2020, data were also collected using handheld survey gas exchange units (for both soil respiration and NEP). (Survey data were collected in more years, but these data are not yet cleaned and analyzable.) Other data sources, such as photosynthetically active radiation (PAR); management records; and soil organic matter (SOM) were also collected for subsets of the period during which the towers were deployed and collecting data.</p>
+<p>The purposes of these analyses include demonstrating the difference in average and cumulative gas exchange across treatments (organic vs.&nbsp;conventional) using eddy covariance data, augmented and supported by survey data and meta-data where necessary and/or appropriate.</p>
+<section id="libraries" class="level2">
+<h2 class="anchored" data-anchor-id="libraries">Libraries</h2>
+</section>
+<section id="upload-cleaned-data-to-global-environment" class="level2">
+<h2 class="anchored" data-anchor-id="upload-cleaned-data-to-global-environment">Upload cleaned data to global environment</h2>
+<section id="eddy-covariance-survey-parweather-at-each-tower-and-management-data" class="level3">
+<h3 class="anchored" data-anchor-id="eddy-covariance-survey-parweather-at-each-tower-and-management-data">Eddy covariance, survey, PAR/weather at each tower, and management data:</h3>
+</section>
+<section id="add-management-data-to-the-ec-chamber-data" class="level3">
+<h3 class="anchored" data-anchor-id="add-management-data-to-the-ec-chamber-data">Add management data to the EC, chamber data:</h3>
+<p>Using a custom function, calculate several continuous variables for each management action. The custom function is called “merge_management_data_timeseries.r” and is informed by regionally-specific characteristics like the expected crop-specific phenology plus days since management action.</p>
+<p>I wrote this initial ec_daily_management df to .csv and made some manual changes to it, based on the management dataset and a line-by-line read to make sure the new continuous and categorical variables accurately reflect it. (see process notes document.) Most of these were done in the CSV file itself. Below, I am uploading the changed document. This involved doing some logic-based assignments of crop stage for the overwintering winter rye cover crop, and the one case of summer rye that overwintered on Kukon in 2020/2021.</p>
+<p>Plot conventional Reco with tillage events:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/Reco_withtillageevents_conv-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Plot organic Reco with tillage events</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/Reco_withtillageevents_org-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<!-- ```{r} -->
+<!-- ## Add PAR data to the hourly EC data: -->
+<!-- ec_hrly_wpar <- ec_hrly_avg %>%  -->
+<!--   left_join(pardat_hourly, -->
+<!--             by = join_by(management, date, hour)) %>%  -->
+<!--   # remove additional (possibly untrustworthy) soil and air temp, rh from PAR dataset -->
+<!--   select(!c(soilt_C, airt_C, rh.y)) -->
+<!-- # and to daily EC data: -->
+<!-- ec_daily_wpar <- ec_daily_avg %>%  -->
+<!--   left_join(pardat_dailymax, -->
+<!--             by = join_by(management, date)) -->
+<!-- ``` -->
+</section>
+</section>
+</section>
+<section id="analyses" class="level1">
+<h1>Analyses</h1>
+<section id="gam-ec-data-daily-averages" class="level2">
+<h2 class="anchored" data-anchor-id="gam-ec-data-daily-averages">GAM: EC data, daily averages</h2>
+<p>Assessing daily average trends is useful because it gives mechanistic insight into how gas exchange varies across management types. This analysis tells us when and how management moderates fluxes throughout the seasons we measured.</p>
+<section id="nee" class="level3">
+<h3 class="anchored" data-anchor-id="nee">NEE</h3>
+<section id="gam-model-development-daily-average" class="level4">
+<h4 class="anchored" data-anchor-id="gam-model-development-daily-average">GAM model development: daily average</h4>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/corplots-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/corplots-2.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<p>Model testing, average NEE over time: simple with main effects, then with different responses by management, then with replacement of NDVI with crop stage to account for phenology. resource on GAMs: https://deepwiki.com/cran/mgcv/2.1-the-gam()-function resource on smoothing and interaction variables: https://deepwiki.com/cran/mgcv/3.1-types-of-smooths</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>           df      AIC
+g3   60.75865 8302.817
+g3.2 81.75316 8291.385
+g3.3 91.15208 8271.081</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: NEE ~ management + crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + s(soilt_avg, by = as.factor(management), 
+    k = 10) + s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, 
+    by = as.factor(management), k = 10) + s(days_since_tillage, 
+    by = as.factor(management), k = 8)
+Model 2: NEE ~ management + crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+  Resid. Df Resid. Dev     Df Deviance Pr(&gt;Chi)   
+1    1713.4      10308                            
+2    1687.9      10004 25.525    304.6 0.001436 **
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: NEE ~ management + crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + s(soilt_avg, by = as.factor(management), 
+    k = 10) + s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, 
+    by = as.factor(management), k = 10) + s(days_since_tillage, 
+    by = as.factor(management), k = 8)
+Model 2: NEE ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+  Resid. Df Resid. Dev    Df Deviance Pr(&gt;Chi)    
+1    1713.4    10308.3                            
+2    1676.2     9786.5 37.19   521.85 2.24e-06 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+</div>
+<p>Going to use simple crop phase as a categorical response, rather than NDVI as a smoothing response, to investigate the effects of management on the different life stages of the crops across the time series.</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/NEE_gam_modviz-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/NEE_gam_output-1.png" class="img-fluid" width="672"></p>
+</div>
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/NEE_gam_output-2.png" class="img-fluid" width="672"></p>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Method: REML   Optimizer: outer newton
+full convergence after 10 iterations.
+Gradient range [-0.00135249,0.0005358389]
+(score 4159.653 &amp; scale 5.748221).
+eigenvalue range [-3.906107e-07,878.598].
+Model rank =  200 / 200 
+
+Basis dimension (k) checking results. Low p-value (k-index&lt;1) may
+indicate that k is too low, especially if edf is close to k'.
+
+                                                              k'      edf
+s(year):as.factor(management)conventional               1.00e+00 9.52e-08
+s(year):as.factor(management)organic                    1.00e+00 2.93e-08
+s(doy)                                                  1.80e+01 1.27e+01
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 4.90e+01 5.29e+00
+ti(soilt_avg,vwc_avg):as.factor(management)organic      4.90e+01 1.21e+01
+s(soilt_avg):as.factor(management)conventional          9.00e+00 2.43e+00
+s(soilt_avg):as.factor(management)organic               9.00e+00 4.39e+00
+s(VPD):as.factor(management)conventional                9.00e+00 3.20e+00
+s(VPD):as.factor(management)organic                     9.00e+00 5.98e+00
+s(vwc_avg):as.factor(management)conventional            9.00e+00 1.00e+00
+s(vwc_avg):as.factor(management)organic                 9.00e+00 6.74e+00
+s(days_since_tillage):as.factor(management)conventional 7.00e+00 4.90e+00
+s(days_since_tillage):as.factor(management)organic      7.00e+00 5.75e+00
+                                                        k-index p-value    
+s(year):as.factor(management)conventional                  0.49  &lt;2e-16 ***
+s(year):as.factor(management)organic                       0.49  &lt;2e-16 ***
+s(doy)                                                     1.14    1.00    
+ti(soilt_avg,vwc_avg):as.factor(management)conventional    1.03    0.91    
+ti(soilt_avg,vwc_avg):as.factor(management)organic         1.03    0.91    
+s(soilt_avg):as.factor(management)conventional             1.00    0.45    
+s(soilt_avg):as.factor(management)organic                  1.00    0.46    
+s(VPD):as.factor(management)conventional                   1.00    0.55    
+s(VPD):as.factor(management)organic                        1.00    0.55    
+s(vwc_avg):as.factor(management)conventional               1.00    0.45    
+s(vwc_avg):as.factor(management)organic                    1.00    0.44    
+s(days_since_tillage):as.factor(management)conventional    0.97    0.10 .  
+s(days_since_tillage):as.factor(management)organic         0.97    0.13    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Family: gaussian 
+Link function: identity 
+
+Formula:
+NEE ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+
+Parametric coefficients:
+                                                Estimate Std. Error t value
+(Intercept)                                      0.15884    0.37663   0.422
+managementorganic                               -1.11203    0.55277  -2.012
+crop_stage_simpleearly                           0.87636    0.52965   1.655
+crop_stage_simplevegetative                      0.09207    0.41619   0.221
+crop_stage_simplereproductive                   -0.11353    0.46936  -0.242
+crop_stage_simplegrain_fill                     -0.79441    0.42691  -1.861
+crop_stage_simpledormant                        -0.22657    0.53827  -0.421
+crop_stage_simplefallow                          1.46194    0.44720   3.269
+managementorganic:crop_stage_simpleearly         2.24519    0.71961   3.120
+managementorganic:crop_stage_simplevegetative    1.04629    0.54534   1.919
+managementorganic:crop_stage_simplereproductive  0.04115    0.61937   0.066
+managementorganic:crop_stage_simplegrain_fill   -0.87595    0.57117  -1.534
+managementorganic:crop_stage_simpledormant      -0.71766    0.76112  -0.943
+managementorganic:crop_stage_simplefallow        2.66124    0.93190   2.856
+                                                Pr(&gt;|t|)   
+(Intercept)                                      0.67328   
+managementorganic                                0.04440 * 
+crop_stage_simpleearly                           0.09819 . 
+crop_stage_simplevegetative                      0.82495   
+crop_stage_simplereproductive                    0.80890   
+crop_stage_simplegrain_fill                      0.06294 . 
+crop_stage_simpledormant                         0.67386   
+crop_stage_simplefallow                          0.00110 **
+managementorganic:crop_stage_simpleearly         0.00184 **
+managementorganic:crop_stage_simplevegetative    0.05520 . 
+managementorganic:crop_stage_simplereproductive  0.94703   
+managementorganic:crop_stage_simplegrain_fill    0.12531   
+managementorganic:crop_stage_simpledormant       0.34587   
+managementorganic:crop_stage_simplefallow        0.00435 **
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Approximate significance of smooth terms:
+                                                              edf Ref.df      F
+s(year):as.factor(management)conventional               9.521e-08  1.000  0.000
+s(year):as.factor(management)organic                    2.926e-08  1.000  0.000
+s(doy)                                                  1.266e+01 18.000  9.624
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 5.291e+00  7.499  1.976
+ti(soilt_avg,vwc_avg):as.factor(management)organic      1.212e+01 16.014  2.154
+s(soilt_avg):as.factor(management)conventional          2.427e+00  3.028  4.611
+s(soilt_avg):as.factor(management)organic               4.390e+00  5.326 10.328
+s(VPD):as.factor(management)conventional                3.205e+00  4.061  9.301
+s(VPD):as.factor(management)organic                     5.982e+00  7.080 50.957
+s(vwc_avg):as.factor(management)conventional            1.004e+00  1.007  0.228
+s(vwc_avg):as.factor(management)organic                 6.745e+00  7.843  2.593
+s(days_since_tillage):as.factor(management)conventional 4.899e+00  5.733  4.057
+s(days_since_tillage):as.factor(management)organic      5.752e+00  6.461  4.575
+                                                         p-value    
+s(year):as.factor(management)conventional               0.001359 ** 
+s(year):as.factor(management)organic                    0.048225 *  
+s(doy)                                                   &lt; 2e-16 ***
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 0.048708 *  
+ti(soilt_avg,vwc_avg):as.factor(management)organic      0.004982 ** 
+s(soilt_avg):as.factor(management)conventional          0.003305 ** 
+s(soilt_avg):as.factor(management)organic                &lt; 2e-16 ***
+s(VPD):as.factor(management)conventional                 &lt; 2e-16 ***
+s(VPD):as.factor(management)organic                      &lt; 2e-16 ***
+s(vwc_avg):as.factor(management)conventional            0.633289    
+s(vwc_avg):as.factor(management)organic                 0.006463 ** 
+s(days_since_tillage):as.factor(management)conventional 0.000689 ***
+s(days_since_tillage):as.factor(management)organic      0.000378 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+R-sq.(adj) =  0.493   Deviance explained = 51.5%
+-REML = 4159.7  Scale est. = 5.7482    n = 1781</code></pre>
+</div>
+</div>
+<section id="interpretation-linear-variables" class="level5">
+<h5 class="anchored" data-anchor-id="interpretation-linear-variables">Interpretation, linear variables:</h5>
+<p>Note: baseline comparison to conventional management and mature crop stage (estimated NEE = 0.159)</p>
+<p>There is a significant effect of organic management on average daily NEE in the mature crop stage, reducing it by 1.1 units when holding other factors constant; this makes sense, in that we’ve seen greater drawdown of ecosystem CO2 in the organic field compared to the conventional one when comparing them directly.</p>
+<p>There are both trends and significant effects of individual crop stage relative to the baseline estimate (conventional, mature). Compared to the conventional mature, the vegetative stage is slightly higher. Compared to the conventional mature, the grain-fill phase is slightly lower. Compared to the conventional mautre, the fallow phase is significantly higher (1.4 units).</p>
+<p>There are also significant interactions between management and crop stage, which are the difference in the crop stage effect between organic and conventional relative to the baseline crop stage; the interaction coefficient therefore tells us how much more or less the difference between that crop stage and the baseline changes under organic compared to conventional management. (To calculate the absolute organic vs.&nbsp;conventional difference in NEE for each crop phase, we’d combine the main effect of organic + the interaction effect of organic on that phase.)</p>
+<p>The effect of organic management on the influence of the early crop phase compared to conventional mature is 2.2 units; the effect of organic management on the influence of the vegetative stage compared to conventional mature is 1 unit. The effect of organic management on the influence of the fallow stage compared to conventional mature is 2.7 units.</p>
+</section>
+<section id="interpretation-smoothing-variables" class="level5">
+<h5 class="anchored" data-anchor-id="interpretation-smoothing-variables">Interpretation, smoothing variables:</h5>
+<p>Almost every single smoothing factor is significant in driving NEE, with the exception of VWC (soil moisture) in the conventional field, demonstrating the effect of each crop stage. The F-test and p-values indicate with the smooth term explains a meaningful amount of the variation in the model’s ability to predict the data. The EDF (estimated degrees of freedom) indicate the complexity of the smoothing term: close to 1 means close to linear, and larger indicates a very ‘wiggly’ or nonlinear relationship between the smoothing term and NEE.</p>
+<p>Seasonality (doy, day of year) has a significant non-linear effect on NEE, capturing expected seasonal variation. The tensor interaction between soil temperature and moisture indicates a significant non-linear effect of the two as they are combined, the extent to which differs by management – the combined effect is important for NEE, but the estimated complexity of this effect is greater in the organic field than the conventional one. This indicates that there are more nuanced and/or variable effects of this interaction there, perhaps due to more nuanced soil properties, soil microbiome, plant-soil interactions, etc. For soil temp and moisture individually, as well as VPD, the nonlinearity of effect is more pronounced in organic than conventional management, though soil moisture does not significantly moderate NEE in the conventional field at all. Days since tillage are similar.</p>
+</section>
+<section id="takeaways" class="level5">
+<h5 class="anchored" data-anchor-id="takeaways">Takeaways:</h5>
+<p>Organic management creates a tendency toward lower NEE, implying either less CO2 respiration or more uptake via photosynthesis, and/or a combination of the two. Crop stage modifies the effect significantly as well, indicating a different effect of crop stage on NEE depending on management strategy, but overall organic management reduces NEE. The smoothing terms universally indicated nonlinear effects on the organic field’s NEE, and almost all except for soil moisture for the conventional field; for the conventional field, the effects were less nonlinear all around.</p>
+<p>Interestingly, the random effect of year demonstrates a) that there IS a significant difference in NEE across years, but also that b) these differences are also dependent on management type, indicating that NEE reacts differently to yearly weather patterns, management change, etc., in each field.</p>
+</section>
+<section id="visualize" class="level5">
+<h5 class="anchored" data-anchor-id="visualize">Visualize:</h5>
+<section id="interactions-nee-daily-average" class="level6">
+<h6 class="anchored" data-anchor-id="interactions-nee-daily-average">Interactions, NEE daily average:</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/GAM_NEE_interactionsplot-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+</section>
+</section>
+</section>
+<section id="reco" class="level3">
+<h3 class="anchored" data-anchor-id="reco">Reco</h3>
+<section id="gam-model-development-daily-average-1" class="level4">
+<h4 class="anchored" data-anchor-id="gam-model-development-daily-average-1">GAM model development: daily average</h4>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>           df      AIC
+r1   70.46897 5430.100
+r1.2 92.54523 5392.568
+r1.3 98.64308 5312.992</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: Reco ~ management + crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+Model 2: Reco ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+  Resid. Df Resid. Dev     Df Deviance      F    Pr(&gt;F)    
+1    1681.9     1926.5                                     
+2    1675.8     1830.1 6.1159   96.383 14.658 &lt; 2.2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+</div>
+<p>Assess model performance:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/Reco_GAM_modviz-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Family: gaussian 
+Link function: identity 
+
+Formula:
+Reco ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+
+Parametric coefficients:
+                                                Estimate Std. Error t value
+(Intercept)                                      3.07036    0.19153  16.031
+managementorganic                                1.06870    0.30170   3.542
+crop_stage_simpleearly                           0.16742    0.23046   0.726
+crop_stage_simplevegetative                      0.48399    0.18122   2.671
+crop_stage_simplereproductive                    0.78167    0.20549   3.804
+crop_stage_simplegrain_fill                      1.69384    0.18840   8.991
+crop_stage_simpledormant                         0.30100    0.24936   1.207
+crop_stage_simplefallow                         -0.26466    0.19526  -1.355
+managementorganic:crop_stage_simpleearly         0.44807    0.32352   1.385
+managementorganic:crop_stage_simplevegetative    0.05697    0.25181   0.226
+managementorganic:crop_stage_simplereproductive -0.42748    0.28176  -1.517
+managementorganic:crop_stage_simplegrain_fill   -1.71098    0.25181  -6.795
+managementorganic:crop_stage_simpledormant       0.71122    0.36661   1.940
+managementorganic:crop_stage_simplefallow        0.67023    0.41364   1.620
+                                                Pr(&gt;|t|)    
+(Intercept)                                      &lt; 2e-16 ***
+managementorganic                               0.000407 ***
+crop_stage_simpleearly                          0.467653    
+crop_stage_simplevegetative                     0.007639 ** 
+crop_stage_simplereproductive                   0.000147 ***
+crop_stage_simplegrain_fill                      &lt; 2e-16 ***
+crop_stage_simpledormant                        0.227575    
+crop_stage_simplefallow                         0.175456    
+managementorganic:crop_stage_simpleearly        0.166242    
+managementorganic:crop_stage_simplevegetative   0.821033    
+managementorganic:crop_stage_simplereproductive 0.129407    
+managementorganic:crop_stage_simplegrain_fill    1.5e-11 ***
+managementorganic:crop_stage_simpledormant      0.052546 .  
+managementorganic:crop_stage_simplefallow       0.105351    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Approximate significance of smooth terms:
+                                                              edf Ref.df      F
+s(year):as.factor(management)conventional               7.054e-07  1.000  0.000
+s(year):as.factor(management)organic                    1.982e-07  1.000  0.000
+s(doy)                                                  1.424e+01 18.000 12.187
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 5.885e+00  7.381  6.105
+ti(soilt_avg,vwc_avg):as.factor(management)organic      1.504e+01 19.699  3.098
+s(soilt_avg):as.factor(management)conventional          5.557e+00  6.644 46.421
+s(soilt_avg):as.factor(management)organic               5.089e+00  6.130 40.295
+s(VPD):as.factor(management)conventional                4.560e+00  5.667  2.457
+s(VPD):as.factor(management)organic                     2.796e+00  3.551 17.573
+s(vwc_avg):as.factor(management)conventional            1.003e+00  1.005 28.373
+s(vwc_avg):as.factor(management)organic                 6.641e+00  7.713  4.756
+s(days_since_tillage):as.factor(management)conventional 4.495e+00  5.364  2.898
+s(days_since_tillage):as.factor(management)organic      6.511e+00  6.895 39.707
+                                                         p-value    
+s(year):as.factor(management)conventional                &lt; 2e-16 ***
+s(year):as.factor(management)organic                     &lt; 2e-16 ***
+s(doy)                                                   &lt; 2e-16 ***
+ti(soilt_avg,vwc_avg):as.factor(management)conventional  &lt; 2e-16 ***
+ti(soilt_avg,vwc_avg):as.factor(management)organic      6.55e-06 ***
+s(soilt_avg):as.factor(management)conventional           &lt; 2e-16 ***
+s(soilt_avg):as.factor(management)organic                &lt; 2e-16 ***
+s(VPD):as.factor(management)conventional                 0.03793 *  
+s(VPD):as.factor(management)organic                      &lt; 2e-16 ***
+s(vwc_avg):as.factor(management)conventional             &lt; 2e-16 ***
+s(vwc_avg):as.factor(management)organic                 1.62e-05 ***
+s(days_since_tillage):as.factor(management)conventional  0.00919 ** 
+s(days_since_tillage):as.factor(management)organic       &lt; 2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+R-sq.(adj) =  0.866   Deviance explained = 87.2%
+-REML = 2713.1  Scale est. = 1.0751    n = 1788</code></pre>
+</div>
+</div>
+<section id="interpretation-linear-variables-1" class="level5">
+<h5 class="anchored" data-anchor-id="interpretation-linear-variables-1">Interpretation, linear variables:</h5>
+<p>Note: baseline comparison to conventional management and mature crop stage (estimated Reco = 3.07)</p>
+<p>Organic management has a significant effect on Reco baseline (conventional, mature) overall of about 1 unit. The crop stage also has significant effects on Reco – vegetative, reproductive, and grain fill respectively. The interactions between crop stage and management is also significant, for grain fill and trending that way for dormant. Again, the interaction coefficient tells us how much more or less the difference between that crop stage, and the baseline (mature), changes under organic compared to conventional management</p>
+</section>
+<section id="interpretaton-smoothing-variables" class="level5">
+<h5 class="anchored" data-anchor-id="interpretaton-smoothing-variables">Interpretaton, smoothing variables:</h5>
+<p>all smoothing variables are significant in their effects on Reco, and much like NEE, organic management tends toward more nonlinearity in each variable’s effects on Reco.</p>
+</section>
+<section id="takeaways-1" class="level5">
+<h5 class="anchored" data-anchor-id="takeaways-1">Takeaways:</h5>
+<p>Again and similar to NEE, organic management has a generally significant effect; in this case, in elevating ecosystem respiration across the board. Under conventional (baseline) management, the vegetative, reproductive, and grain fill stages also show significantly higher Reco, indicating that Reco tends to increase as crops develop and peaks at grain fill. In terms of interactions between management and crop stage, there is evidence that the increase in respiration at grain fill is dampened under organic management compared to the same stage under conventional management; so while respiration increases in organic generally, the ‘burst’ of respiration that occurs around grain fill is higher in the conventional field than in the organic one. Generally speaking, there are nonlinear and greater-in-complexity smoothing variables that represent edaphic characteristics in the organic field, indicating again greater complexity in the soil environment, microbiome, and/or the plant-soil interactions there.</p>
+</section>
+<section id="visualize-1" class="level5">
+<h5 class="anchored" data-anchor-id="visualize-1">Visualize:</h5>
+<section id="interactions-reco-daily-average" class="level6">
+<h6 class="anchored" data-anchor-id="interactions-reco-daily-average">Interactions, Reco daily average:</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/Reco_GAM_interactionsplot-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+</section>
+</section>
+</section>
+<section id="gpp" class="level3">
+<h3 class="anchored" data-anchor-id="gpp">GPP</h3>
+<section id="gam-model-development-daily-average-2" class="level4">
+<h4 class="anchored" data-anchor-id="gam-model-development-daily-average-2">GAM model development: daily average:</h4>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>           df      AIC
+p1   64.28674 7953.106
+p1.2 84.91324 7923.709
+p1.3 91.95485 7912.924</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: GPP_f ~ management + crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+Model 2: GPP_f ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+  Resid. Df Resid. Dev     Df Deviance      F   Pr(&gt;F)   
+1    1689.6     8003.2                                   
+2    1682.4     7892.7 7.1935   110.54 3.3292 0.001412 **
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+</div>
+<p>Assess model performance:</p>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-1-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Family: gaussian 
+Link function: identity 
+
+Formula:
+GPP_f ~ management * crop_stage_simple + s(year, bs = "re", by = as.factor(management)) + 
+    s(doy, bs = "cc", k = 20) + ti(soilt_avg, vwc_avg, by = as.factor(management), 
+    k = c(8, 8)) + s(soilt_avg, by = as.factor(management), k = 10) + 
+    s(VPD, by = as.factor(management), k = 10) + s(vwc_avg, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+
+Parametric coefficients:
+                                                Estimate Std. Error t value
+(Intercept)                                      2.84717    0.38466   7.402
+managementorganic                                1.81161    0.46523   3.894
+crop_stage_simpleearly                          -0.91447    0.47810  -1.913
+crop_stage_simplevegetative                      0.09474    0.37670   0.252
+crop_stage_simplereproductive                    0.42961    0.42181   1.018
+crop_stage_simplegrain_fill                      1.82900    0.38676   4.729
+crop_stage_simpledormant                         0.51022    0.51014   1.000
+crop_stage_simplefallow                         -1.80087    0.40051  -4.496
+managementorganic:crop_stage_simpleearly        -0.66745    0.65372  -1.021
+managementorganic:crop_stage_simplevegetative   -0.32563    0.50981  -0.639
+managementorganic:crop_stage_simplereproductive  0.43580    0.57216   0.762
+managementorganic:crop_stage_simplegrain_fill   -0.45068    0.50745  -0.888
+managementorganic:crop_stage_simpledormant       1.60953    0.71505   2.251
+managementorganic:crop_stage_simplefallow       -0.68404    0.84128  -0.813
+                                                Pr(&gt;|t|)    
+(Intercept)                                     2.10e-13 ***
+managementorganic                               0.000102 ***
+crop_stage_simpleearly                          0.055952 .  
+crop_stage_simplevegetative                     0.801456    
+crop_stage_simplereproductive                   0.308592    
+crop_stage_simplegrain_fill                     2.44e-06 ***
+crop_stage_simpledormant                        0.317368    
+crop_stage_simplefallow                         7.38e-06 ***
+managementorganic:crop_stage_simpleearly        0.307401    
+managementorganic:crop_stage_simplevegetative   0.523089    
+managementorganic:crop_stage_simplereproductive 0.446360    
+managementorganic:crop_stage_simplegrain_fill   0.374596    
+managementorganic:crop_stage_simpledormant      0.024516 *  
+managementorganic:crop_stage_simplefallow       0.416276    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Approximate significance of smooth terms:
+                                                              edf Ref.df      F
+s(year):as.factor(management)conventional               9.840e-08  1.000  0.000
+s(year):as.factor(management)organic                    2.842e-08  1.000  0.000
+s(doy)                                                  1.409e+01 18.000 15.607
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 6.504e+00  9.025  3.697
+ti(soilt_avg,vwc_avg):as.factor(management)organic      8.020e+00 11.402  1.516
+s(soilt_avg):as.factor(management)conventional          4.397e+00  5.354 13.748
+s(soilt_avg):as.factor(management)organic               1.016e+00  1.028  0.650
+s(VPD):as.factor(management)conventional                3.472e+00  4.385  7.010
+s(VPD):as.factor(management)organic                     5.145e+00  6.251 30.145
+s(vwc_avg):as.factor(management)conventional            4.584e+00  5.684  2.198
+s(vwc_avg):as.factor(management)organic                 6.176e+00  7.332  2.886
+s(days_since_tillage):as.factor(management)conventional 4.313e+00  5.170  3.054
+s(days_since_tillage):as.factor(management)organic      6.280e+00  6.794 11.909
+                                                         p-value    
+s(year):as.factor(management)conventional                &lt; 2e-16 ***
+s(year):as.factor(management)organic                    0.022934 *  
+s(doy)                                                   &lt; 2e-16 ***
+ti(soilt_avg,vwc_avg):as.factor(management)conventional 0.000138 ***
+ti(soilt_avg,vwc_avg):as.factor(management)organic      0.117302    
+s(soilt_avg):as.factor(management)conventional           &lt; 2e-16 ***
+s(soilt_avg):as.factor(management)organic               0.425554    
+s(VPD):as.factor(management)conventional                9.34e-06 ***
+s(VPD):as.factor(management)organic                      &lt; 2e-16 ***
+s(vwc_avg):as.factor(management)conventional            0.033029 *  
+s(vwc_avg):as.factor(management)organic                 0.005219 ** 
+s(days_since_tillage):as.factor(management)conventional 0.009417 ** 
+s(days_since_tillage):as.factor(management)organic       &lt; 2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+R-sq.(adj) =  0.761   Deviance explained = 77.1%
+-REML =   3983  Scale est. = 4.6156    n = 1788</code></pre>
+</div>
+</div>
+</section>
+<section id="interpretation-linear-variables-2" class="level4">
+<h4 class="anchored" data-anchor-id="interpretation-linear-variables-2">Interpretation, linear variables:</h4>
+<p>Baseline GPP (mature crop stage, conventional management) estimate: 2.85</p>
+<p>Organic management increases GPP by about 1.8 units. Under conventional management, there is a trend toward lower GPP in the early phase compared to mature (makes sense) and significantly higher GPP in the crop fill stage (also makes sense). There is significantly lower GPP in the fallow phase (also expected). Like respiration, GPP peaks in the grain fill stage. Most interaction terms aren’t significant, except that between organic management and dormat crop stage, which has a 1.6 unit increase compared to baseline, indicating that GPP is higher in the organic field during dormancy than in the conventional field during dormancy.</p>
+</section>
+<section id="interpretation-smoothing-variables-1" class="level4">
+<h4 class="anchored" data-anchor-id="interpretation-smoothing-variables-1">Interpretation, smoothing variables:</h4>
+<p>Unlike NEE and Reco, the tensor interaction between soil temp and moisture is significant only for the conventional field, indicating that there is a strong combined influence there but not the organic field. To that end, soil temperature is significant and very complex in the conventional field but not organic, while soil moisture is significant and complex in both fields but more so in the organic field. VPD is significant and nonlinear in the organic field as well, and days since tillage is again significant in both fields but more complex in the organic field.</p>
+</section>
+<section id="takeaways-2" class="level4">
+<h4 class="anchored" data-anchor-id="takeaways-2">Takeaways:</h4>
+<p>As for NEE and Reco, organic management is highly significant and results in higher baseline GPP (and thus productivity). GPP is strongly moderated by crop stage, particularly grain fill (peak productivity) and dormant (low). An interesting note is that there is no significant interaction between crop stage and management except for dormancy in the organic field, when dormant cover crops over the winter months have greater GPP than those dormant cover crops in the conventional field.</p>
+<p>The conventional field has strong nonlinear effects of soil temperature as well as the interaction between soil temperature and moisture, while the organic field does not; however, the organic field demonstrates more complex effects of the other edaphic drivers on GPP including soil moisture. As predicted and expected, seasonality and year-to-year variation are both significant drivers of GPP in all cases.</p>
+</section>
+<section id="visualize-2" class="level4">
+<h4 class="anchored" data-anchor-id="visualize-2">Visualize:</h4>
+<section id="interactions-gpp-daily-average" class="level6">
+<h6 class="anchored" data-anchor-id="interactions-gpp-daily-average">Interactions, GPP daily average:</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-3-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<!-- ## GAM: EC data, yearly cumulative -->
+<!-- This analysis allows us to ask whether the systems differ in being a carbon sink or source and get closer to a total carbon budget. This analysis tells us whether the above differences in fluxes across management translate into whole-season differences in carbon balance. -->
+</section>
+</section>
+</section>
+</section>
+<section id="gam-chamber-data-daily-averages" class="level2">
+<h2 class="anchored" data-anchor-id="gam-chamber-data-daily-averages">GAM: chamber data, daily averages</h2>
+<section id="nee-daily-average" class="level4">
+<h4 class="anchored" data-anchor-id="nee-daily-average">NEE: daily average</h4>
+<p>There are significantly fewer observations with the survey chambers, but in general we want to see agreement with the trends we saw in the eddy covariance dataset (at least for the years for which we have concurrent data: 2019 and 2020). Our daily averages are going to be based on two daytime observations, rather than 24hr averages. Thus the NEE and Rs values will be daytime only and perhaps a bit easier to interpret.</p>
+<p>Model development:</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>         df      AIC
+c1 18.16276 571.5739
+c2 24.89599 567.2237
+c3 32.87916 558.5610</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: NEE_umolm2sec_mean ~ management + crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(airtempC_mean, by = as.factor(management), 
+    k = 10) + s(soilm_perc_mean, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+Model 2: NEE_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(airtempC_mean, by = as.factor(management), 
+    k = 10) + s(soilm_perc_mean, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+  Resid. Df Resid. Dev    Df Deviance      F  Pr(&gt;F)  
+1    79.459     1351.3                                
+2    72.437     1126.7 7.022   224.63 2.1514 0.04853 *
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: NEE_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(airtempC_mean, by = as.factor(management), 
+    k = 10) + s(soilm_perc_mean, by = as.factor(management), 
+    k = 10) + s(days_since_tillage, by = as.factor(management), 
+    k = 8)
+Model 2: NEE_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + ti(soilm_perc_mean, 
+    airtempC_mean, by = as.factor(management), k = c(8, 8)) + 
+    s(airtempC_mean, by = as.factor(management), k = 10) + s(soilm_perc_mean, 
+    by = as.factor(management), k = 10) + s(days_since_tillage, 
+    by = as.factor(management), k = 8)
+  Resid. Df Resid. Dev     Df Deviance      F  Pr(&gt;F)  
+1    72.437    1126.65                                 
+2    62.424     876.28 10.013   250.37 1.9923 0.04917 *
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Family: gaussian 
+Link function: identity 
+
+Formula:
+NEE_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + ti(soilm_perc_mean, 
+    airtempC_mean, by = as.factor(management), k = c(8, 8)) + 
+    s(airtempC_mean, by = as.factor(management), k = 10) + s(soilm_perc_mean, 
+    by = as.factor(management), k = 10) + s(days_since_tillage, 
+    by = as.factor(management), k = 8)
+
+Parametric coefficients:
+                                                Estimate Std. Error t value
+(Intercept)                                        5.943      3.728   1.594
+managementorganic                                -12.531     10.474  -1.196
+crop_stage_simpleearly                            -5.865      3.549  -1.652
+crop_stage_simplevegetative                       -5.092      3.458  -1.473
+crop_stage_simplereproductive                     -9.129      3.589  -2.543
+crop_stage_simplegrain_fill                       -9.982      3.318  -3.009
+crop_stage_simplefallow                           -3.935      3.734  -1.054
+managementorganic:crop_stage_simpleearly           8.739      4.202   2.080
+managementorganic:crop_stage_simplevegetative     11.699      4.180   2.799
+managementorganic:crop_stage_simplereproductive   13.283      4.452   2.983
+managementorganic:crop_stage_simplegrain_fill      9.498      4.098   2.318
+managementorganic:crop_stage_simplefallow          0.000      0.000     NaN
+                                                Pr(&gt;|t|)   
+(Intercept)                                      0.11537   
+managementorganic                                0.23558   
+crop_stage_simpleearly                           0.10294   
+crop_stage_simplevegetative                      0.14534   
+crop_stage_simplereproductive                    0.01320 * 
+crop_stage_simplegrain_fill                      0.00365 **
+crop_stage_simplefallow                          0.29571   
+managementorganic:crop_stage_simpleearly         0.04122 * 
+managementorganic:crop_stage_simplevegetative    0.00662 **
+managementorganic:crop_stage_simplereproductive  0.00393 **
+managementorganic:crop_stage_simplegrain_fill    0.02339 * 
+managementorganic:crop_stage_simplefallow            NaN   
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Approximate significance of smooth terms:
+                                                                          edf
+s(year):as.factor(management)conventional                           1.470e-08
+s(year):as.factor(management)organic                                2.026e-07
+s(month):as.factor(management)conventional                          6.462e-05
+s(month):as.factor(management)organic                               3.359e-01
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional 5.411e+00
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic      1.005e+00
+s(airtempC_mean):as.factor(management)conventional                  1.000e+00
+s(airtempC_mean):as.factor(management)organic                       1.000e+00
+s(soilm_perc_mean):as.factor(management)conventional                1.170e+00
+s(soilm_perc_mean):as.factor(management)organic                     1.710e+00
+s(days_since_tillage):as.factor(management)conventional             1.635e+00
+s(days_since_tillage):as.factor(management)organic                  3.916e+00
+                                                                    Ref.df
+s(year):as.factor(management)conventional                            1.000
+s(year):as.factor(management)organic                                 1.000
+s(month):as.factor(management)conventional                           4.000
+s(month):as.factor(management)organic                                4.000
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional  7.428
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic       1.009
+s(airtempC_mean):as.factor(management)conventional                   1.000
+s(airtempC_mean):as.factor(management)organic                        1.000
+s(soilm_perc_mean):as.factor(management)conventional                 1.300
+s(soilm_perc_mean):as.factor(management)organic                      2.171
+s(days_since_tillage):as.factor(management)conventional              1.965
+s(days_since_tillage):as.factor(management)organic                   4.387
+                                                                        F
+s(year):as.factor(management)conventional                           0.000
+s(year):as.factor(management)organic                                0.000
+s(month):as.factor(management)conventional                          0.000
+s(month):as.factor(management)organic                               0.101
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional 1.435
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic      0.040
+s(airtempC_mean):as.factor(management)conventional                  0.069
+s(airtempC_mean):as.factor(management)organic                       1.126
+s(soilm_perc_mean):as.factor(management)conventional                0.634
+s(soilm_perc_mean):as.factor(management)organic                     1.229
+s(days_since_tillage):as.factor(management)conventional             3.683
+s(days_since_tillage):as.factor(management)organic                  3.260
+                                                                    p-value  
+s(year):as.factor(management)conventional                            0.5000  
+s(year):as.factor(management)organic                                 0.5000  
+s(month):as.factor(management)conventional                           0.9778  
+s(month):as.factor(management)organic                                0.5597  
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional  0.3481  
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic       0.8554  
+s(airtempC_mean):as.factor(management)conventional                   0.7938  
+s(airtempC_mean):as.factor(management)organic                        0.2922  
+s(soilm_perc_mean):as.factor(management)conventional                 0.5488  
+s(soilm_perc_mean):as.factor(management)organic                      0.2762  
+s(days_since_tillage):as.factor(management)conventional              0.0350 *
+s(days_since_tillage):as.factor(management)organic                   0.0139 *
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Rank: 169/170
+R-sq.(adj) =  0.499   Deviance explained = 63.9%
+-REML =  238.4  Scale est. = 12.551    n = 98</code></pre>
+</div>
+</div>
+<section id="interpretation" class="level5">
+<h5 class="anchored" data-anchor-id="interpretation">Interpretation:</h5>
+<p>While there is no significant effect of management on chamber-based daily average NEE, there it is clear that both crop stage (reproductive, grain fill) both reduce NEE when compared to the baseline of conventional, mature crop by quite a bit. Additionally, the interaction between management and crop stage is significant, with enhanced effects of early, vegetative, reproductive, and grain fill stages on NEE in the organic field compared to the conventional one.</p>
+<p>The only smoothing factors that are significant in driving NEE are days since tillage, though the effect is much more complex in the organic field than the conventional one.</p>
+</section>
+<section id="takeaways-3" class="level5">
+<h5 class="anchored" data-anchor-id="takeaways-3">Takeaways:</h5>
+<p>These results largely align with those data collected from the EC towers, reinforcing the conclusions that organic management generally reduces NEE but that this effect varies by crop stage. The drivers of the effect are much less linear / more complex in the organic field compared to the conventional one.</p>
+</section>
+<section id="visualize-3" class="level5">
+<h5 class="anchored" data-anchor-id="visualize-3">Visualize:</h5>
+<section id="predicted-through-crop-stage" class="level6">
+<h6 class="anchored" data-anchor-id="predicted-through-crop-stage">Predicted Through Crop Stage:</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-9-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+<section id="predicted-vs.-observed" class="level6">
+<h6 class="anchored" data-anchor-id="predicted-vs.-observed">Predicted vs.&nbsp;Observed</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-10-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+</section>
+</section>
+<section id="reco-daily-average" class="level3">
+<h3 class="anchored" data-anchor-id="reco-daily-average">Reco: daily average</h3>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>         df      AIC
+n1 25.25305 538.8713
+n2 29.72541 507.1832
+n3 33.21324 508.7876</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: Rs_umolm2sec_mean ~ management + crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(soilm_perc_mean, k = 10, 
+    by = as.factor(management)) + s(airtempC_mean, k = 10, by = as.factor(management)) + 
+    s(days_since_tillage, k = 8, by = as.factor(management))
+Model 2: Rs_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(soilm_perc_mean, k = 10, 
+    by = as.factor(management)) + s(airtempC_mean, k = 10, by = as.factor(management)) + 
+    s(days_since_tillage, k = 8, by = as.factor(management))
+  Resid. Df Resid. Dev     Df Deviance      F    Pr(&gt;F)    
+1    72.239     837.49                                     
+2    67.726     553.24 4.5126   284.25 8.0638 1.034e-05 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Analysis of Deviance Table
+
+Model 1: Rs_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + s(soilm_perc_mean, k = 10, 
+    by = as.factor(management)) + s(airtempC_mean, k = 10, by = as.factor(management)) + 
+    s(days_since_tillage, k = 8, by = as.factor(management))
+Model 2: Rs_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + ti(soilm_perc_mean, 
+    airtempC_mean, by = as.factor(management), k = c(8, 8)) + 
+    s(soilm_perc_mean, k = 10, by = as.factor(management)) + 
+    s(airtempC_mean, k = 10, by = as.factor(management)) + s(days_since_tillage, 
+    k = 8, by = as.factor(management))
+  Resid. Df Resid. Dev     Df Deviance     F Pr(&gt;F)
+1    67.726     553.24                             
+2    63.401     523.73 4.3252   29.506 0.888 0.4828</code></pre>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-12-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>
+Family: gaussian 
+Link function: identity 
+
+Formula:
+Rs_umolm2sec_mean ~ management * crop_stage_simple + s(year, 
+    bs = "re", by = as.factor(management)) + s(month, bs = "cc", 
+    k = 6, by = as.factor(management)) + ti(soilm_perc_mean, 
+    airtempC_mean, by = as.factor(management), k = c(8, 8)) + 
+    s(soilm_perc_mean, k = 10, by = as.factor(management)) + 
+    s(airtempC_mean, k = 10, by = as.factor(management)) + s(days_since_tillage, 
+    k = 8, by = as.factor(management))
+
+Parametric coefficients:
+                                                 Estimate Std. Error t value
+(Intercept)                                       4.33021    2.76317   1.567
+managementorganic                                 1.16566   13.14109   0.089
+crop_stage_simpleearly                           -4.25172    2.65227  -1.603
+crop_stage_simplevegetative                      -2.16520    2.53564  -0.854
+crop_stage_simplereproductive                     4.73589    2.74388   1.726
+crop_stage_simplegrain_fill                       7.79382    2.63126   2.962
+crop_stage_simplefallow                          -0.05764    2.85150  -0.020
+managementorganic:crop_stage_simpleearly          1.68518    3.21576   0.524
+managementorganic:crop_stage_simplevegetative    -2.59409    3.19680  -0.811
+managementorganic:crop_stage_simplereproductive -11.88158    3.56474  -3.333
+managementorganic:crop_stage_simplegrain_fill   -13.23215    3.33267  -3.970
+managementorganic:crop_stage_simplefallow         0.00000    0.00000     NaN
+                                                Pr(&gt;|t|)    
+(Intercept)                                     0.121718    
+managementorganic                               0.929578    
+crop_stage_simpleearly                          0.113548    
+crop_stage_simplevegetative                     0.396148    
+crop_stage_simplereproductive                   0.088881 .  
+crop_stage_simplegrain_fill                     0.004204 ** 
+crop_stage_simplefallow                         0.983933    
+managementorganic:crop_stage_simpleearly        0.601952    
+managementorganic:crop_stage_simplevegetative   0.419925    
+managementorganic:crop_stage_simplereproductive 0.001391 ** 
+managementorganic:crop_stage_simplegrain_fill   0.000175 ***
+managementorganic:crop_stage_simplefallow            NaN    
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Approximate significance of smooth terms:
+                                                                          edf
+s(year):as.factor(management)conventional                           1.047e-08
+s(year):as.factor(management)organic                                1.712e-07
+s(month):as.factor(management)conventional                          3.458e+00
+s(month):as.factor(management)organic                               2.608e+00
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional 1.164e+00
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic      1.772e+00
+s(soilm_perc_mean):as.factor(management)conventional                1.000e+00
+s(soilm_perc_mean):as.factor(management)organic                     1.000e+00
+s(airtempC_mean):as.factor(management)conventional                  1.000e+00
+s(airtempC_mean):as.factor(management)organic                       1.000e+00
+s(days_since_tillage):as.factor(management)conventional             1.372e+00
+s(days_since_tillage):as.factor(management)organic                  4.453e+00
+                                                                    Ref.df
+s(year):as.factor(management)conventional                            1.000
+s(year):as.factor(management)organic                                 1.000
+s(month):as.factor(management)conventional                           4.000
+s(month):as.factor(management)organic                                4.000
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional  1.318
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic       2.221
+s(soilm_perc_mean):as.factor(management)conventional                 1.000
+s(soilm_perc_mean):as.factor(management)organic                      1.000
+s(airtempC_mean):as.factor(management)conventional                   1.000
+s(airtempC_mean):as.factor(management)organic                        1.000
+s(days_since_tillage):as.factor(management)conventional              1.628
+s(days_since_tillage):as.factor(management)organic                   4.815
+                                                                         F
+s(year):as.factor(management)conventional                            0.000
+s(year):as.factor(management)organic                                 0.000
+s(month):as.factor(management)conventional                          13.392
+s(month):as.factor(management)organic                                2.714
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional  1.611
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic       1.251
+s(soilm_perc_mean):as.factor(management)conventional                 0.738
+s(soilm_perc_mean):as.factor(management)organic                      1.334
+s(airtempC_mean):as.factor(management)conventional                   0.076
+s(airtempC_mean):as.factor(management)organic                        4.372
+s(days_since_tillage):as.factor(management)conventional             12.536
+s(days_since_tillage):as.factor(management)organic                  13.206
+                                                                     p-value
+s(year):as.factor(management)conventional                             0.5000
+s(year):as.factor(management)organic                                  0.9995
+s(month):as.factor(management)conventional                            0.3743
+s(month):as.factor(management)organic                                 0.0735
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional   0.2612
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic        0.2881
+s(soilm_perc_mean):as.factor(management)conventional                  0.3932
+s(soilm_perc_mean):as.factor(management)organic                       0.2521
+s(airtempC_mean):as.factor(management)conventional                    0.7835
+s(airtempC_mean):as.factor(management)organic                         0.0403
+s(days_since_tillage):as.factor(management)conventional             9.18e-05
+s(days_since_tillage):as.factor(management)organic                  3.15e-06
+                                                                       
+s(year):as.factor(management)conventional                              
+s(year):as.factor(management)organic                                   
+s(month):as.factor(management)conventional                             
+s(month):as.factor(management)organic                               .  
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)conventional    
+ti(soilm_perc_mean,airtempC_mean):as.factor(management)organic         
+s(soilm_perc_mean):as.factor(management)conventional                   
+s(soilm_perc_mean):as.factor(management)organic                        
+s(airtempC_mean):as.factor(management)conventional                     
+s(airtempC_mean):as.factor(management)organic                       *  
+s(days_since_tillage):as.factor(management)conventional             ***
+s(days_since_tillage):as.factor(management)organic                  ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Rank: 169/170
+R-sq.(adj) =   0.85   Deviance explained = 89.5%
+-REML = 224.97  Scale est. = 7.6824    n = 98</code></pre>
+</div>
+</div>
+<p>#####Interpretation: Again, management does not have a clear significant effect when holding all else equal. However, crop stage once again indicates differences in ecosystem respiration with fallow having significantly higher respiration when compared to conventional mature, and grain fill indicating higher respiration as well. The interaction between management and crop stage is significant for the reproductive and grain fill stages, indicating a much lower respiration rate in these stages when compared to conventional mature.</p>
+<p>As for chamber-based NEE, chamber-based ecosystem respiraiton is significantly moderated by days since tillage and once again, the effect is far more complex for the organic field than the conventional field. In addition, the organic field has a significant effect of air temperature, which is fairly linear in its positive effect, and seasonality (here, month) indicates a slightly positive effect in the organic field as well.</p>
+<p>#####Takeaways: Again this analysis largely supports the conclusions from the EC tower data, and days since tillage seems to be the most prominent smoothing variable in both fields that emerges from the “all smooths are significant” outcomes of the tower data, in terms of moderating both NEE and ecosystem respiration on the scale of the collars.</p>
+<section id="visualize-4" class="level5">
+<h5 class="anchored" data-anchor-id="visualize-4">Visualize:</h5>
+<section id="predicted-through-crop-stage-1" class="level6">
+<h6 class="anchored" data-anchor-id="predicted-through-crop-stage-1">Predicted Through Crop Stage:</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-14-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+<section id="predicted-vs.-observed-1" class="level6">
+<h6 class="anchored" data-anchor-id="predicted-vs.-observed-1">Predicted vs.&nbsp;Observed</h6>
+<div class="cell">
+<div class="cell-output-display">
+<p><img src="eddycovariance_HC_Woodwell_files/figure-html/unnamed-chunk-15-1.png" class="img-fluid" width="672"></p>
+</div>
+</div>
+</section>
+</section>
+</section>
+</section>
+</section>
+
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+window.document.addEventListener("DOMContentLoaded", function (event) {
+  const toggleBodyColorMode = (bsSheetEl) => {
+    const mode = bsSheetEl.getAttribute("data-mode");
+    const bodyEl = window.document.querySelector("body");
+    if (mode === "dark") {
+      bodyEl.classList.add("quarto-dark");
+      bodyEl.classList.remove("quarto-light");
+    } else {
+      bodyEl.classList.add("quarto-light");
+      bodyEl.classList.remove("quarto-dark");
+    }
+  }
+  const toggleBodyColorPrimary = () => {
+    const bsSheetEl = window.document.querySelector("link#quarto-bootstrap");
+    if (bsSheetEl) {
+      toggleBodyColorMode(bsSheetEl);
+    }
+  }
+  toggleBodyColorPrimary();  
+  const icon = "";
+  const anchorJS = new window.AnchorJS();
+  anchorJS.options = {
+    placement: 'right',
+    icon: icon
+  };
+  anchorJS.add('.anchored');
+  const isCodeAnnotation = (el) => {
+    for (const clz of el.classList) {
+      if (clz.startsWith('code-annotation-')) {                     
+        return true;
+      }
+    }
+    return false;
+  }
+  const clipboard = new window.ClipboardJS('.code-copy-button', {
+    text: function(trigger) {
+      const codeEl = trigger.previousElementSibling.cloneNode(true);
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+  });
+  clipboard.on('success', function(e) {
+    // button target
+    const button = e.trigger;
+    // don't keep focus
+    button.blur();
+    // flash "checked"
+    button.classList.add('code-copy-button-checked');
+    var currentTitle = button.getAttribute("title");
+    button.setAttribute("title", "Copied!");
+    let tooltip;
+    if (window.bootstrap) {
+      button.setAttribute("data-bs-toggle", "tooltip");
+      button.setAttribute("data-bs-placement", "left");
+      button.setAttribute("data-bs-title", "Copied!");
+      tooltip = new bootstrap.Tooltip(button, 
+        { trigger: "manual", 
+          customClass: "code-copy-button-tooltip",
+          offset: [0, -8]});
+      tooltip.show();    
+    }
+    setTimeout(function() {
+      if (tooltip) {
+        tooltip.hide();
+        button.removeAttribute("data-bs-title");
+        button.removeAttribute("data-bs-toggle");
+        button.removeAttribute("data-bs-placement");
+      }
+      button.setAttribute("title", currentTitle);
+      button.classList.remove('code-copy-button-checked');
+    }, 1000);
+    // clear code selection
+    e.clearSelection();
+  });
+  function tippyHover(el, contentFn) {
+    const config = {
+      allowHTML: true,
+      content: contentFn,
+      maxWidth: 500,
+      delay: 100,
+      arrow: false,
+      appendTo: function(el) {
+          return el.parentElement;
+      },
+      interactive: true,
+      interactiveBorder: 10,
+      theme: 'quarto',
+      placement: 'bottom-start'
+    };
+    window.tippy(el, config); 
+  }
+  const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+  for (var i=0; i<noterefs.length; i++) {
+    const ref = noterefs[i];
+    tippyHover(ref, function() {
+      // use id or data attribute instead here
+      let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+      try { href = new URL(href).hash; } catch {}
+      const id = href.replace(/^#\/?/, "");
+      const note = window.document.getElementById(id);
+      return note.innerHTML;
+    });
+  }
+      let selectedAnnoteEl;
+      const selectorForAnnotation = ( cell, annotation) => {
+        let cellAttr = 'data-code-cell="' + cell + '"';
+        let lineAttr = 'data-code-annotation="' +  annotation + '"';
+        const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+        return selector;
+      }
+      const selectCodeLines = (annoteEl) => {
+        const doc = window.document;
+        const targetCell = annoteEl.getAttribute("data-target-cell");
+        const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+        const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+        const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+        const lineIds = lines.map((line) => {
+          return targetCell + "-" + line;
+        })
+        let top = null;
+        let height = null;
+        let parent = null;
+        if (lineIds.length > 0) {
+            //compute the position of the single el (top and bottom and make a div)
+            const el = window.document.getElementById(lineIds[0]);
+            top = el.offsetTop;
+            height = el.offsetHeight;
+            parent = el.parentElement.parentElement;
+          if (lineIds.length > 1) {
+            const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+            const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+            height = bottom - top;
+          }
+          if (top !== null && height !== null && parent !== null) {
+            // cook up a div (if necessary) and position it 
+            let div = window.document.getElementById("code-annotation-line-highlight");
+            if (div === null) {
+              div = window.document.createElement("div");
+              div.setAttribute("id", "code-annotation-line-highlight");
+              div.style.position = 'absolute';
+              parent.appendChild(div);
+            }
+            div.style.top = top - 2 + "px";
+            div.style.height = height + 4 + "px";
+            let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+            if (gutterDiv === null) {
+              gutterDiv = window.document.createElement("div");
+              gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+              gutterDiv.style.position = 'absolute';
+              const codeCell = window.document.getElementById(targetCell);
+              const gutter = codeCell.querySelector('.code-annotation-gutter');
+              gutter.appendChild(gutterDiv);
+            }
+            gutterDiv.style.top = top - 2 + "px";
+            gutterDiv.style.height = height + 4 + "px";
+          }
+          selectedAnnoteEl = annoteEl;
+        }
+      };
+      const unselectCodeLines = () => {
+        const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+        elementsIds.forEach((elId) => {
+          const div = window.document.getElementById(elId);
+          if (div) {
+            div.remove();
+          }
+        });
+        selectedAnnoteEl = undefined;
+      };
+      // Attach click handler to the DT
+      const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+      for (const annoteDlNode of annoteDls) {
+        annoteDlNode.addEventListener('click', (event) => {
+          const clickedEl = event.target;
+          if (clickedEl !== selectedAnnoteEl) {
+            unselectCodeLines();
+            const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+            if (activeEl) {
+              activeEl.classList.remove('code-annotation-active');
+            }
+            selectCodeLines(clickedEl);
+            clickedEl.classList.add('code-annotation-active');
+          } else {
+            // Unselect the line
+            unselectCodeLines();
+            clickedEl.classList.remove('code-annotation-active');
+          }
+        });
+      }
+  const findCites = (el) => {
+    const parentEl = el.parentElement;
+    if (parentEl) {
+      const cites = parentEl.dataset.cites;
+      if (cites) {
+        return {
+          el,
+          cites: cites.split(' ')
+        };
+      } else {
+        return findCites(el.parentElement)
+      }
+    } else {
+      return undefined;
+    }
+  };
+  var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+  for (var i=0; i<bibliorefs.length; i++) {
+    const ref = bibliorefs[i];
+    const citeInfo = findCites(ref);
+    if (citeInfo) {
+      tippyHover(citeInfo.el, function() {
+        var popup = window.document.createElement('div');
+        citeInfo.cites.forEach(function(cite) {
+          var citeDiv = window.document.createElement('div');
+          citeDiv.classList.add('hanging-indent');
+          citeDiv.classList.add('csl-entry');
+          var biblioDiv = window.document.getElementById('ref-' + cite);
+          if (biblioDiv) {
+            citeDiv.innerHTML = biblioDiv.innerHTML;
+          }
+          popup.appendChild(citeDiv);
+        });
+        return popup.innerHTML;
+      });
+    }
+  }
+});
+</script>
+</div> <!-- /content -->
+
+
+
+</body></html>

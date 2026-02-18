@@ -1,0 +1,13 @@
+"0","ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>%
+  mutate(
+    drought_stress = VPD > quantile(VPD, 0.75) & 
+                     vwc_avg < quantile(vwc_avg, 0.25)
+  )
+"
+"1","[1m[33mError[39m in `mutate()`:[22m
+[38;5;232m[36mℹ[38;5;232m In argument: `drought_stress = VPD > quantile(VPD, 0.75) & vwc_avg < quantile(vwc_avg,
+  0.25)`.[39m
+[1mCaused by error in `quantile.default()`:[22m
+[33m![39m missing values and NaN's not allowed if 'na.rm' is FALSE
+[90mRun `]8;;x-r-run:rlang::last_trace()rlang::last_trace()]8;;` to see where the error occurred.[39m
+"
