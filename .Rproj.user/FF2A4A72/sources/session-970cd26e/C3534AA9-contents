@@ -1,0 +1,50 @@
+# Compare crop_stage_simple distributions between old and new data
+ec_daily_mngmnt4 %>% count(management, crop_stage_simple) %>% 
+  mutate(pct = n / sum(n), dataset = "old")
+# 
+# management   crop_stage_simple     n      pct dataset
+# <fct>        <fct>             <int>    <dbl> <chr>  
+# 1 conventional mature              127 0.0530   old    
+# 2 conventional early                82 0.0342   old    
+# 3 conventional vegetative          302 0.126    old    
+# 4 conventional reproductive         95 0.0396   old    
+# 5 conventional grain_fill          160 0.0668   old    
+# 6 conventional dormant             200 0.0834   old    
+# 7 conventional fallow              284 0.118    old    
+# 8 conventional NA                    1 0.000417 old    
+# 9 organic      mature              224 0.0935   old    
+# 10 organic      early                82 0.0342   old    
+# 11 organic      vegetative          319 0.133    old    
+# 12 organic      reproductive        124 0.0517   old    
+# 13 organic      grain_fill           71 0.0296   old    
+# 14 organic      dormant             306 0.128    old    
+# 15 organic      fallow               20 0.00834  old    
+
+ec_daily_mngmnt %>% count(management, crop_stage_simple) %>%
+  mutate(pct = n / sum(n), dataset = "new")
+# management   crop_stage_simple     n     pct dataset
+# <fct>        <fct>             <int>   <dbl> <chr>  
+# 1 conventional mature              167 0.0712  new    
+# 2 conventional early                84 0.0358  new    
+# 3 conventional vegetative          362 0.154   new    
+# 4 conventional reproductive         95 0.0405  new    
+# 5 conventional grain_fill          160 0.0682  new    
+# 6 conventional dormant             100 0.0426  new    
+# 7 conventional fallow              283 0.121   new    
+# 8 organic      mature              182 0.0776  new    
+# 9 organic      early                81 0.0345  new    
+# 10 organic      vegetative          352 0.150   new    
+# 11 organic      reproductive        104 0.0443  new    
+# 12 organic      grain_fill           96 0.0409  new    
+# 13 organic      dormant             262 0.112   new    
+# 14 organic      fallow               17 0.00725 new   
+
+# Check dormant changes by field and year
+ec_daily_mngmnt4 %>% 
+  filter(crop_stage_simple == "dormant") %>%
+  count(management, year)
+
+ec_daily_mngmnt %>%
+  filter(crop_stage_simple == "dormant") %>%
+  count(management, year)
+

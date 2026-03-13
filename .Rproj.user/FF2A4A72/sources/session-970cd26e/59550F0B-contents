@@ -1,0 +1,727 @@
+---
+title: "fluxbot data"
+format: html
+editor: visual
+---
+
+## Fluxbot array data
+
+This project processes the raw CO2 data collected from 55 fluxbots deployed across Gros Morne National Park in summer 2024: converting raw data into flux estimates, and subsequent analyses across the interacting environmental variables the deployment locations represented.
+
+## Load packages
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(here)
+library(purrr)
+library(stringr)
+library(openxlsx)
+library(readr)
+```
+
+## Converting raw data to flux estimates
+
+Upload data: first use a custom function (xlsx_to_list.R) to read in the xlsx data files (one for each data stream: co2, pressure, temperature, and humidity) as a list, with each entry in the list corresponding to a fluxbot.
+
+```{r}
+#| echo: false
+ 
+# function to import a single xlsx file with each tab as a separate df in a list of dfs with the name of the tab as the df name
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+  # I prefer straight data.frames
+  # but if you like tidyverse tibbles (the default with read_excel)
+  # then just pass tibble = TRUE
+  sheets <- readxl::excel_sheets(filename)
+  x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+  if(!tibble) x <- lapply(x, as.data.frame)
+  names(x) <- sheets
+  x
+}
+
+# read in CO2 data:
+co2 <- read_excel_allsheets(here("online fluxbots", "fluxbot_co2.xlsx"), tibble = FALSE)
+# subset out just the 2024 GMNP fluxbots using purrr::keep_at, which allows the user to keep or discard elements in a list based on their name or position
+co2 <- co2 %>%
+  purrr::keep_at(~ str_detect(., "^Fluxbot_2") & nchar(.) == 11)
+
+# read in pressure data:
+press <- read_excel_allsheets(here("online fluxbots", "fluxbot_pressure.xlsx"), tibble = FALSE)
+press <- press %>%
+  purrr::keep_at(~ str_detect(., "^Fluxbot_2") & nchar(.) == 11)
+
+# read in humidity data:
+humid <- read_excel_allsheets(here("online fluxbots", "fluxbot_humidity.xlsx"), tibble = FALSE)
+humid <- humid %>%
+  purrr::keep_at(~ str_detect(., "^Fluxbot_2") & nchar(.) == 11)
+
+# read in temperature data:
+temp <- read_excel_allsheets(here("online fluxbots", "fluxbot_temperature.xlsx"), tibble = FALSE)
+temp <- temp %>%
+  purrr::keep_at(~ str_detect(., "^Fluxbot_2") & nchar(.) == 11)
+# fix typo ("temprerature" to "temperature"):
+# Function to rename the third column in list of dfs:
+rename_third_column <- function(df, new_name) {
+  colnames(df)[3] <- new_name
+  return(df)
+}
+temp <- map(temp, rename_third_column, new_name = "temperature")
+
+```
+
+Clean data: second, we will process these data such that the messy format from Google sheets (e.g. multiple data entries in a single cell) that we had to use for transmitting the data with as little cellular usage as possible can be tidied. This process includes transforming the UNIX timestamp to POSIXct, and writing the files as CSV files to the source folder, as well as storing it as a list itself.
+
+```{r}
+#| echo: false
+
+# We will be using a custom function written for fluxbot google sheet data, that unpacks all the data within one cell and transposes it into columns. Each fluxbot sensor will return a df with two columns: one a 2min interval of timestamp and the other 2min of data inside of square brackets per cell.
+
+# this function processes a list of dataframes and transposes the within-cell data into long-form. It also converts the UNIX timestamps to POSIXct-form timestamps for easier analysis.
+process_data <- function(df_list, col1, col2) {
+  longdat_list <- list()  # Initialize the list
+  
+  for (i in seq_along(df_list)) {
+    df <- df_list[[i]]
+    
+    # Check if col1 and col2 exist in the data frame
+    if (!(col1 %in% names(df) && col2 %in% names(df))) {
+      warning("Column names not found in the data frame.")
+      next
+    }
+    
+    # Extract values from lists in col1 and col2
+    df <- df %>%
+      mutate(
+        UNIX = gsub("\\[|\\]", "", df[[col1]]),
+        data = gsub("\\[|\\]", "", df[[col2]])
+      ) %>%
+      separate_rows(UNIX, data, sep = ",") %>%
+      mutate(
+        UNIX = as.numeric(UNIX),  # Convert UNIX timestamps to numeric
+        data = as.numeric(data)   # Convert data column to numeric
+      ) %>%
+      select(UNIX, data) %>%
+      rename(!!sym(col2) := data)  # Rename the "data" column to the name of col2
+    
+    # sym(col2) converts the string col2 into a symbol.
+    # !! unquotes the symbol so that it can be used as a column name in the rename() function.
+    # rename(!!sym(col2) := data): This renames the "data" column to the value of col2 provided when calling the function.
+    
+    # Store the processed dataframe in the list with the name of the input df
+    longdat_list[[paste0("rawdata_", names(df_list)[i])]] <- df
+  }
+  
+  # Return the results in a list of data frames
+  return(longdat_list)
+}
+
+# Example usage:
+# processed_data <- process_data(df_list, col1 = "device timestamps", col2 = "co2")
+
+# process co2 into lists of longform raw data:
+co2_raw <- process_data(co2, col1 = "device timestamps", col2 = "co2")
+
+# process pressure:
+press_raw <- process_data(press, col1 = "device timestamps", col2 = "pressure")
+  
+# humitidy:
+humid_raw <- process_data(humid, col1 = "device timestamps", col2 = "humidity")
+  
+# temp:
+temp_raw <- process_data(temp, col1 = "device timestamps", col2 = "temperature")
+
+```
+
+Third, we want to merge all the data frames for each fluxbot into one dataframe, by their shared column (timestamp). This means instead of a separate file for each datastream, we'll have one file with all four (connected in time).
+
+```{r}
+
+merge_by_column <- function(df1, df2, col) {
+  # Check for duplicate values in the common column
+  if (any(duplicated(df1[[col]])) || any(duplicated(df2[[col]]))) {
+    warning("Duplicate values detected in the common column. Duplicates will be removed before merging.")
+  }
+  
+  # Remove duplicates if present
+  df1 <- df1[!duplicated(df1[[col]]), ]
+  df2 <- df2[!duplicated(df2[[col]]), ]
+  
+  # Merge data frames by the common column
+  merged_df <- merge(df1, df2, by = col, all = TRUE)
+  return(merged_df)
+}
+
+# list of dfs, that uses previous function:
+merge_lists_by_column <- function(list_a, list_b, list_c, list_d, col) {
+  merged_results <- list() # list to store final merged data frames
+  
+  # Track the shared names of the sublists
+  sublist_names <- names(list_a)
+  
+  # Iterate over each sublist name
+  for (name in sublist_names) {
+    # Extract corresponding lists from each input list
+    sublist_a <- list_a[[name]]
+    sublist_b <- list_b[[name]]
+    sublist_c <- list_c[[name]]
+    sublist_d <- list_d[[name]]
+    
+    # Merge data frames from different sublists by the common column
+    merged_df <- sublist_a # Initialize merged_df with sublist_a
+    if (!is.null(sublist_b)) merged_df <- merge_by_column(merged_df, sublist_b, col)
+    if (!is.null(sublist_c)) merged_df <- merge_by_column(merged_df, sublist_c, col)
+    if (!is.null(sublist_d)) merged_df <- merge_by_column(merged_df, sublist_d, col)
+    
+    # Name the merged list by the shared name of each sublist
+    merged_results[[name]] <- merged_df
+  }
+  
+  return(merged_results)
+}
+
+merged_result <- merge_lists_by_column(co2_raw, humid_raw, temp_raw, press_raw, "UNIX")
+
+# Function to change column names and convert specified columns
+change_colnames_and_convert <- function(lst) {
+  lapply(lst, function(df) {
+    # Change column names
+    colnames(df) <- c("Time", "co2_ppm", "humidity_percent", "temp_C", "pressure_hPa")
+    
+    # Convert specific columns to numeric (assuming they are character)
+    df$Time <- as.numeric(df$Time)
+    df$Time <- as.POSIXct(df$Time, format = "%Y-%m-%d %H:%M:%S", tz = "America/St_Johns")
+    
+    return(df)
+  })
+}
+
+# Apply the function to the list of lists: result will be a list of dataframes with updated colnames
+fluxdat_GMNP_list <- change_colnames_and_convert(merged_result)
+```
+
+Identify a start/end interval dataframe to include in the flux estimate function You can either: extract start/end df from one of the df's you generated (required: needs to be one that captured all the timestamps for a deployment i.e. didn't die early) Or you can: manually produce start/end df for the period of deployment in question
+
+```{r}
+#| echo: false
+# identify "longest" df in the list of dataframes:
+longest_df <- 
+  fluxdat_GMNP_list %>% 
+  map_int(nrow) %>% # count number of rows across all elements in the list
+  which.max() %>% # identify the element with the max number of rows
+  {names(fluxdat_GMNP_list)[.]} # extract the name of that element
+longest_df
+# [1] "rawdata_Fluxbot_205"
+
+# extracting start/end dates of the longest df in the list:
+fluxdat_GMNP_list %>% .[["rawdata_Fluxbot_205"]] %>% pull(Time) %>% min(na.rm = TRUE)
+# earliest datetime = 2024-06-10 12:00:40 EDT
+fluxdat_GMNP_list %>% .[["rawdata_Fluxbot_205"]] %>% pull(Time) %>% max(na.rm = TRUE)
+# latest datetime = 2024-07-05 11:32:24 EDT
+
+# generate a viable start-end df: this will have start/end brackets for the wanted observation intervals for every hour between the earliest and latest datetimes identified above (this can also be determined manually)
+start_datetime <- as.POSIXct("2024-06-10 00:00:00", tz = "America/St_Johns")
+end_datetime <- as.POSIXct("2024-07-06 00:00:00", tz = "America/St_Johns")
+interval_length <- as.difftime(1, units = "hours")  # 1 hour interval
+
+generate_interval_df <- function(start_datetime, end_datetime, interval_length, start_minute, start_second, end_minute, end_second) {
+  # Initialize empty vectors to store start and end timestamps
+  start_timestamps <- c()
+  end_timestamps <- c()
+  
+  # Loop through each hour and generate start and end timestamps
+  current_hour <- trunc(start_datetime, "hour")
+  while (current_hour < end_datetime) {
+    start_interval <- current_hour + as.difftime(start_minute, units = "mins") + as.difftime(start_second, units = "secs")
+    end_interval <- current_hour + as.difftime(end_minute, units = "mins") + as.difftime(end_second, units = "secs")
+    
+    # Ensure end interval does not exceed end_datetime
+    end_interval <- min(end_interval, end_datetime)
+    
+    # Append start and end timestamps to vectors
+    start_timestamps <- c(start_timestamps, start_interval)
+    end_timestamps <- c(end_timestamps, end_interval)
+    
+    # Move to the next hour
+    current_hour <- current_hour + as.difftime(1, units = "hours")
+  }
+  
+  # Convert the vectors to POSIXct format
+  start_timestamps <- as.POSIXct(start_timestamps, origin = "1970-01-01", tz = "America/St_Johns")
+  end_timestamps <- as.POSIXct(end_timestamps, origin = "1970-01-01", tz = "America/St_Johns")
+  
+  # Create a data frame from the start and end timestamps
+  interval_df <- data.frame(Start = start_timestamps, End = end_timestamps)
+  return(interval_df)
+}
+
+
+start_end <- generate_interval_df(start_datetime, end_datetime,
+                                  interval_length,
+                                  start_minute = 26, start_second = 00,
+                                  end_minute = 29, end_second = 59)
+```
+
+Replace the pressure data for all the fluxbots, using pressure data gleaned from nearby weather stations in Gros Morne NP. (Feel free to keep the old pressure data but re-name it something else so the auto-processing script uses the correct, new data.)
+
+```{r}
+
+# read in the met data from the Berry Hill met station (downloaded from offline)
+berryhill_met <- read.csv("weatherstats_rockyharbour_hourly.csv", header = TRUE)
+# convert pressure columns from kPa to hPa to match the fluxbot data
+berryhill_met <- berryhill_met %>% 
+  mutate(press_station_hPa = 10*pressure_station,
+         press_sea_hPa = 10*pressure_sea) %>% 
+  mutate(Time = as.POSIXct(unixtime,
+                           format = "%Y-%m-%d %H:%M:%S",
+                           tz = "America/St_Johns"))
+
+# Define a function to apply the process to a single data frame
+join_met_data <- function(df) {
+  df <- df %>%
+    left_join(berryhill_met,
+              join_by(closest(Time>=Time))) %>% 
+    select(Time.x, co2_ppm, humidity_percent, temp_C, pressure_hPa, 
+           press_station_hPa, wind_speed) %>%
+    rename(Time = Time.x)
+  
+  return(df)
+}
+
+# Apply the function to each data frame in the list using purrr::map
+fluxdat_metdata_list <- map(fluxdat_GMNP_list, join_met_data)
+```
+
+Use the start-end interval to process each fluxbot's data into flux estimates. First, define the function.
+
+```{r}
+# function to convert iterative observation intervals of co2 accumulation over 4min time periods (in concentration, ppm) to units of co2 mass accumulation; the function uses ideal gas laws and a humidity correction to convert from ppm to kg co2. Once converted, the function then takes both a linear and quadratic regression of each accumulation interval, and uses the resultant slopes (beta values) to calculate a rate of increase in CO2 over time, per unit area.
+
+# currently the function requires an input of the time series dataframe itself, a custom intervals dataframe (two columns, one labeled "Start" and one labeled "End" with each row indicating the ideal start and end of each interval in the time series df in POSIXct format), and an indication of the method (e.g. is it "LGR" or "fluxbot" generated data).
+
+calculate_regressions_custom_intervals <- function(time_series_df, custom_intervals_df, 
+                                                   method, volume, area) {
+  
+  # Remove rows with NAs
+  time_series_df <- time_series_df[complete.cases(time_series_df), ]
+  
+  # Extract timestamp and data columns from the time series dataframe
+  # timestamp_col <- as.POSIXct(time_series_df$Time, format = "%Y-%m-%d %H:%M:%S")
+  timestamp_col <- as.POSIXct(time_series_df$Time, format = "%Y-%m-%d %H:%M:%S", tz = "America/St_Johns")
+  data_col <- time_series_df$co2_ppm     
+  
+  # Initialize an empty dataframe to store the results
+  results_df <- data.frame(
+    start_timestamp = character(),
+    end_timestamp = character(),
+    linear_beta = numeric(),
+    quadratic_beta = numeric()
+  )
+  
+  # Quality control thresholds: if an interval 'fails' any of these it is skipped and excluded from the final output
+  diff_threshold <- 5 # difference in co2 concentration delta from start-end needs to be greater than 5ppm
+  max_threshold <- 3000 # eliminate any intervals that contain co2 concentrations greater than 3k ppm
+  length_threshold <- 15 # the length of an interval needs to be at least 15 observations (40 obs per 4mins interval for fluxbot)
+  
+  # constants for conversion of concentration to mass:
+  R_m = 8.314472  # Ideal gas constant for mass [(m3*Pa)/(K*mol)]
+  R_specific <- 287.058 # specific gas constant for dry air (J/kg*K)
+  mol_mass <- 28.9628 # molar mass dry air, g/mol
+  volume <- volume # cm3; volume of fluxbot chamber, typically 768cm3 without additional tubing/attachments
+  area <- area # cm2; area of soil that fluxbot collar encompasses, typically 81cm2
+  g_per_mol = 44.009 # molar mass of CO2, g/mol
+  
+  # Loop through each row in the custom intervals dataframe to ID the start and end point of each interval
+  for (i in seq_len(nrow(custom_intervals_df))) {
+    # Extract start and end points for the current row
+    start_point <- custom_intervals_df$Start[i]
+    end_point <- custom_intervals_df$End[i]
+    
+    # Find the closest timestamp to start_point and end_point in the time series data itself:
+    start_index <- which.min(abs(timestamp_col - start_point))
+    end_index <- which.min(abs(timestamp_col - end_point))
+    
+    # Check if the closest start and end points are within 30 minutes
+    if (abs(start_point - timestamp_col[start_index]) > 1800 || abs(end_point - timestamp_col[end_index]) > 1800) {
+      cat("Skipping interval due to no close timepoints:", j, "\n")
+      next  # Skip to the next iteration
+    }
+    
+    # Extract the CO2 concentration data for each interval iteratively using the above timestamps:
+    interval_data <- time_series_df$co2_ppm[start_index:end_index]
+    interval_timestamp <- time_series_df$Time[start_index:end_index]
+    # identify the interval pressure to run QAQC too:
+    # interval_pressure <- time_series_df$pressure_hPa[start_index:end_index]
+    # determine total length of interval; reports in mins, so convert to sec:
+    length_interval <- (as.numeric(time_series_df$Time[end_index] - time_series_df$Time[start_index]))*60
+    
+    # Quality control checks with printouts of reasons for excluding a given interval:
+    if (any(is.na(interval_data))) {
+      cat("Skipping interval due to NAs in the data:", i, "\n")
+      next  # Skip to the next iteration
+    }
+    
+    if (abs(interval_data[1] - interval_data[length(interval_data)]) < diff_threshold) {
+      cat("Skipping interval due to extremely small delta:", i, "\n")
+      next  # Skip to the next iteration
+    }
+    
+    if (interval_data[length(interval_data)] - interval_data[1] < 0){
+      cat("Skipping interval due to negative delta:", i, "\n")
+      next
+    }
+
+    if(max(interval_data) > max_threshold) {
+    cat("Skipping interval: concentration too high:", i, "\n")
+    next # Skip to the next iteration
+    }
+    
+    if(length(interval_data) < length_threshold) {
+      cat("Skipping interval due to insufficient length:", i, "\n")
+      next # Skip to the next iteration
+    }
+    
+    # temporary fix for intervals with weird pressure data, March 4th 2024, 
+    # while I figure out how to sub in good pressure data when needed
+    # Implement quality control check for pressure data
+    # if (any(interval_pressure > 1050) || any(interval_pressure < 965)) {
+      # cat("Skipping interval due to error in pressure data:", i, "\n")
+      # next  # Skip to the next iteration
+    # }
+    
+    # Remove rows with specific value for co2 indicating a data transmission error, within the interval data
+    interval_data <- interval_data[interval_data != 65535]
+    interval_data <- interval_data[interval_data != 65533]
+    
+    # calculate rho_a, air density in kg/m3, including humidity:
+    # first step, calculate saturation vapor pressure in hPa
+    e_star <- 10*(0.61978 * exp((17.27 * time_series_df$temp_C)[start_index:end_index]/
+                                  (time_series_df$temp_C[start_index:end_index] + 
+                                     273.3))) # saturation vapor pressure, hPa
+    # next: saturation density (kg water / kg air) given saturation vapor pressure (e_star) and observed air pressure
+    # 0.62198 = ratio of molecular masses of water and dry air (18.01528 / 28.9645)
+    x_s <- 0.62198 * e_star / (time_series_df$press_station_hPa[start_index:end_index] - e_star) 
+    
+    # next: calculate humidity ratio using saturation density and observed relative humidity:
+    x <- x_s * time_series_df$humidity_percent[start_index:end_index] / 100 # divide by 100 to convert to a fraction
+    
+    # finally, calculate the observed density of humidity-corrected air in the chamber:
+    # first: density of air in kg/m3 using specific gas constant for dry air
+    rho_d <- (time_series_df$press_station_hPa[start_index:end_index] * 100) / 
+      (R_specific * (time_series_df$temp_C[start_index:end_index] + 273.15)) # here converting T to Kelvin from Celcius
+    # air density in kg/m3 with humidity correction as calculated in "x" above:
+    # 1.609 = gas constant ratio between water vapor and air
+    rho_a <- rho_d * (1+x) / (1 + 1.609 * x) 
+    
+    # convert (general) co2 in ppm to mol/m3
+    mol_kg = 1/(mol_mass/1000) # mass of air in mol/kg
+    # calculate mol of moist air per m3 in the chamber given previously-calculated moist air densities
+    mol_m3 = mol_kg * rho_a # mass of moist air in chamber in mol/m3
+    
+    # convert (our observed) co2 in ppm to molar density using chamber volume:
+    mol_gas_m3 <- mol_m3 * (interval_data/1000000) # returns mol/m3 (conversion from cm3 to m3 = 1,000,000)
+    
+    # convert molar concentration of CO2 into concentration in kg/m3
+    kg_gas_m3 <- mol_gas_m3 * (g_per_mol/1000) # (conversion of g to kg = 1000)
+    
+    # convert to just mass in kg (volume reported in cm3, converting to m3 here, inverse conversion = 0.000001):
+    kg_gas <- kg_gas_m3 * (volume * 0.000001) # returns kg of co2 in the chamber at each time point in interval
+    
+    # Linear regression
+    linear_model <- lm(kg_gas ~ as.numeric(difftime(interval_timestamp, min(interval_timestamp), units = "secs")))
+    linear_results <- summary(linear_model)
+    linear_beta <- coef(linear_results)[2]  # Extract the beta coefficient; kg/s
+    delta_kg_L = linear_beta*(length_interval) # units in kg
+    delta_g_L = delta_kg_L*1000 # units in g
+    delta_mol_L = delta_g_L / g_per_mol # units in mols
+    fluxL = delta_kg_L / length_interval / (area*0.0001) # flux estimate in kg/m2/sec
+    fluxL_umol = (delta_mol_L*1000000) / length_interval / (area * 0.0001) # flux estimate in umol/m2/sec
+    
+    # Quadratic regression
+    quadratic_model <- lm(kg_gas ~ 
+                            as.numeric(difftime(interval_timestamp, min(interval_timestamp), 
+                                                units = "secs")) +
+                            I(as.numeric(difftime(interval_timestamp, 
+                                                  min(interval_timestamp), 
+                                                  units = "secs"))^2))
+    quadratic_results <- summary(quadratic_model)
+    quadratic_beta <- coef(quadratic_results)[2]  # Extract the beta coefficient; kg/s
+    delta_kg_Q  = quadratic_beta*(length_interval) # units in kg
+    delta_g_Q = delta_kg_Q*1000 # units in g
+    delta_mol_Q = delta_g_Q / g_per_mol # units in mols
+    fluxQ = delta_kg_Q / length_interval / (area*0.0001) # flux estimate in kg/m2/sec
+    fluxQ_umol = (delta_mol_Q*1000000) / length_interval / (area * 0.0001) # flux estimate in umol/m2/sec
+    
+    # Append the results to the dataframe
+    results_df <- rbind(results_df, data.frame(
+      start_timestamp = start_point,
+      end_timestamp = end_point,
+      hour_of_obs = round(end_point, "hour"),
+      method = method,
+      linear_beta = linear_beta, # kg/s
+      quadratic_beta = quadratic_beta, # kg/s
+      length_interval = length_interval, # total interval length in seconds
+      delta_kg_L = linear_beta/length_interval, # units in kg
+      delta_kg_Q  = quadratic_beta/length_interval, # units in kg
+      fluxL_kgm2sec = fluxL, # flux estimate in kg/m2/sec
+      fluxQ_kgm2sec = fluxQ, # flux estimate in kg/m2/sec
+      fluxL_umolm2sec = fluxL_umol, # flux estimate in umol/m2/sec
+      fluxQ_umolm2sec = fluxQ_umol  # flux estimate in umol/m2/sec
+    ))
+  }
+  
+  # Return the results
+  return(results_df)
+}
+
+```
+
+Then, use purrr::map to apply the function to the entire list of dataframes.
+
+```{r}
+#| echo: false
+# Example call for a single time series data frame
+results <- calculate_regressions_custom_intervals(fluxdat_metdata_list[["rawdata_Fluxbot_230"]], start_end, 
+                                                  method = "fluxbot", volume = 768, area = 81)
+
+fluxdat_estimates <- map(fluxdat_metdata_list, ~calculate_regressions_custom_intervals(.x, start_end, "fluxbot", 768, 81))
+```
+
+Write the list to an xlsx file with multiple tabs (one for each bot's data)
+
+```{r}
+# update the names of the elements of the list, as these are no longer raw data but flux estimates:
+prefix <- "rawdata_"
+fluxdat_estimates <- fluxdat_estimates %>%
+  keep(startsWith(names(.), prefix)) %>% 
+         set_names(str_replace(names(.), prefix, ""))
+
+# write to multi-sheet xlsx file in working directory:
+openxlsx::write.xlsx(fluxdat_estimates,
+                     file = "fluxestimates_onlinebots_GMNP.xlsx",
+                     sheetName = names(fluxdat_estimates),
+                     colNames = TRUE,
+                     rowNames = FALSE)
+```
+
+Some viz for visual confirmation that the data aren't trash; cycle through different time windows and Bot IDs to look around.
+
+```{r}
+fluxdat_GMNP_list[["rawdata_Fluxbot_207"]] %>%
+  filter(co2_ppm < 10000) %>%
+  # filter(Time > as.POSIXct("2024-06-16", tz = "America/St_Johns")) %>%
+  # filter(Time > as.POSIXct("2024-06-16", tz = "America/St_Johns")) %>%
+  filter(Time > as.POSIXct("2024-06-16 20:26:00", tz = "America/St_Johns")) %>%
+  filter(Time < as.POSIXct("2024-06-16 20:29:59", tz = "America/St_Johns")) %>%
+    ggplot() +
+    geom_point(aes(x = Time, y=co2_ppm),
+               alpha = 0.25) +
+  ylab(bquote(~CO[2]*" concentration, ppm"))+
+  xlab("")+
+  theme_classic()+
+  theme(legend.position = c(0.08,0.88))
+
+```
+
+#################################################################### 
+
+## Offline fluxbots
+
+I had to download the data for a subset of bots at a single site (Lomond #2) as there was no cell service at that site. One of those bots was able to connect and transmit data, so I'll check what I generate with the SD card data against what it transmitted to be sure everything is there and the timestamps align. I will also need to consult my field notes to figure out the best way to adjust timestamps for each bot after it went offline (e.g. some seemed to be in EST, some in NL time).
+
+Upload data:
+
+```{r}
+#| echo: false
+#| 
+file <- readLines(here("offline fluxbots", "223", "CO2_RAW.TXT"))
+# replace multiple delimiters with a comma
+file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# write to temp file
+file_temp <- tempfile()
+write_lines(file, file_temp)
+# read using read_delim
+rawdata_Fluxbot_223 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# unlink temp file:
+unlink(file_temp)
+
+file <- readLines(here("offline fluxbots", "226", "CO2_RAW.TXT"))
+# replace multiple delimiters with a comma
+file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# write to temp file
+file_temp <- tempfile()
+write_lines(file, file_temp)
+# read using read_delim
+rawdata_Fluxbot_226 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# unlink temp file:
+unlink(file_temp)
+
+file <- readLines(here("offline fluxbots", "235", "CO2_RAW.TXT"))
+# replace multiple delimiters with a comma
+file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# write to temp file
+file_temp <- tempfile()
+write_lines(file, file_temp)
+# read using read_delim
+rawdata_Fluxbot_235 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# unlink temp file:
+unlink(file_temp)
+
+file <- readLines(here("offline fluxbots", "236", "CO2_RAW.TXT"))
+# replace multiple delimiters with a comma
+file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# write to temp file
+file_temp <- tempfile()
+write_lines(file, file_temp)
+# read using read_delim
+rawdata_Fluxbot_236 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# unlink temp file:
+unlink(file_temp)
+
+file <- readLines(here("offline fluxbots", "243", "CO2_RAW.TXT"))
+# replace multiple delimiters with a comma
+file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# write to temp file
+file_temp <- tempfile()
+write_lines(file, file_temp)
+# read using read_delim
+rawdata_Fluxbot_243 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# unlink temp file:
+unlink(file_temp)
+
+# file <- readLines(here("offline fluxbots", "225", "CO2_RAW.TXT"))
+# # replace multiple delimiters with a comma
+# file <- str_replace_all(file, '[\\[\\]:{}""]', ',')
+# # write to temp file
+# file_temp <- tempfile()
+# write_lines(file, file_temp)
+# # read using read_delim
+# rawdata_Fluxbot_225 <- read_delim(file_temp, delim = ",", col_names = FALSE)
+# # unlink temp file:
+# unlink(file_temp)
+
+rawdata_Fluxbot_223 <- rawdata_Fluxbot_223 %>% select_if(~ !any(is.na(.)))
+rawdata_Fluxbot_226 <- rawdata_Fluxbot_226 %>% select_if(~ !any(is.na(.)))
+rawdata_Fluxbot_235 <- rawdata_Fluxbot_235 %>% select_if(~ !any(is.na(.)))
+rawdata_Fluxbot_236 <- rawdata_Fluxbot_236 %>% select_if(~ !any(is.na(.)))
+rawdata_Fluxbot_243 <- rawdata_Fluxbot_243 %>% select_if(~ !any(is.na(.)))
+
+# transpose data into long form:
+# Assign column names
+num_time_points <- 10 # First 10 columns are time points
+col_names <- c("seconds", 1:num_time_points, "sensor", paste0("value_", 1:6))
+
+# Assign column names to the dataframe
+colnames(rawdata_Fluxbot_223) <- col_names
+
+# Reshape the data
+raw223_long <- rawdata_Fluxbot_223 %>%
+  rename_with(~ paste0("TIMESTAMP_", .), .cols = matches("^\\d+$")) %>% 
+  # for some reason value_6 is character, not numeric; convert --
+  mutate(value_6 = as.numeric(value_6)) %>% 
+  pivot_longer(cols = starts_with("TIMESTAMP_"), names_to = "TIMESTAMP_LABEL", values_to = "TIMESTAMP") %>%
+  pivot_longer(cols = starts_with("value_"), names_to = "VALUE_LABEL", values_to = "VALUE") %>%
+  filter(str_extract(TIMESTAMP_LABEL, "\\d+") == str_extract(VALUE_LABEL, "\\d+")) %>%
+  select(-TIMESTAMP_LABEL, -VALUE_LABEL) %>% 
+  pivot_wider(names_from = sensor, values_from = VALUE) %>% 
+  select(TIMESTAMP, co2, pressure, humidity, temprerature) %>% 
+  rename(., temperature = temprerature)
+
+#####
+# for the remainder of the dfs:
+col_names <- c("seconds", paste0("unix_", 1:20), "sensor", paste0("value_", 1:20))
+colnames(rawdata_Fluxbot_226) <- col_names
+colnames(rawdata_Fluxbot_235) <- col_names
+colnames(rawdata_Fluxbot_236) <- col_names
+colnames(rawdata_Fluxbot_243) <- col_names
+
+# reshape data for each:
+raw226_long <- rawdata_Fluxbot_226 %>%
+  pivot_longer(cols = starts_with("unix_"), names_to = "TIMESTAMP_LABEL", values_to = "TIMESTAMP") %>%
+  pivot_longer(cols = starts_with("value_"), names_to = "VALUE_LABEL", values_to = "VALUE") %>%
+  filter(str_extract(TIMESTAMP_LABEL, "\\d+") == str_extract(VALUE_LABEL, "\\d+")) %>%
+  select(-TIMESTAMP_LABEL, -VALUE_LABEL) %>% 
+  pivot_wider(names_from = sensor, values_from = VALUE) %>% 
+  select(TIMESTAMP, co2, pressure, humidity, temprerature) %>% 
+  rename(., temperature = temprerature)
+
+raw235_long <- rawdata_Fluxbot_235 %>%
+  pivot_longer(cols = starts_with("unix_"), names_to = "TIMESTAMP_LABEL", values_to = "TIMESTAMP") %>%
+  pivot_longer(cols = starts_with("value_"), names_to = "VALUE_LABEL", values_to = "VALUE") %>%
+  filter(str_extract(TIMESTAMP_LABEL, "\\d+") == str_extract(VALUE_LABEL, "\\d+")) %>%
+  select(-TIMESTAMP_LABEL, -VALUE_LABEL) %>% 
+  # remove duplicate rows: all data that has repeated timestamps. this probably has to do with re-starting
+  # but we had multiple instances of the same time stamp being used for different data. 
+  # Can't know for sure which one is real, so remove all but the first occurrence of those timestamps to be safe.
+  # Use distinct() only on TIMESTAMP and sensor, keeping all other data intact
+  group_by(TIMESTAMP, sensor) %>%
+  filter(row_number() == 1) %>%  # Keep only the first occurrence of each TIMESTAMP-sensor combination
+  ungroup() %>%
+  pivot_wider(names_from = sensor, values_from = VALUE) %>% 
+  select(TIMESTAMP, co2, pressure, humidity, temprerature) %>% 
+  rename(., temperature = temprerature)
+
+raw236_long <- rawdata_Fluxbot_236 %>%
+  # rename_with(~ paste0("TIMESTAMP_", .), .cols = matches("^\\d+$")) %>% 
+  pivot_longer(cols = starts_with("unix_"), names_to = "TIMESTAMP_LABEL", values_to = "TIMESTAMP") %>%
+  pivot_longer(cols = starts_with("value_"), names_to = "VALUE_LABEL", values_to = "VALUE") %>%
+  filter(str_extract(TIMESTAMP_LABEL, "\\d+") == str_extract(VALUE_LABEL, "\\d+")) %>%
+  select(-TIMESTAMP_LABEL, -VALUE_LABEL) %>% 
+    # remove duplicate rows: all data that has repeated timestamps. this probably has to do with re-starting
+  # but we had multiple instances of the same time stamp being used for different data. 
+  # Can't know for sure which one is real, so remove all but the first occurrence of those timestamps to be safe.
+  # Use distinct() only on TIMESTAMP and sensor, keeping all other data intact
+  group_by(TIMESTAMP, sensor) %>%
+  filter(row_number() == 1) %>%  # Keep only the first occurrence of each TIMESTAMP-sensor combination
+  ungroup() %>%
+  pivot_wider(names_from = sensor, values_from = VALUE) %>% 
+  select(TIMESTAMP, co2, pressure, humidity, temprerature) %>% 
+  rename(., temperature = temprerature)
+
+raw243_long <- rawdata_Fluxbot_243 %>%
+  # rename_with(~ paste0("TIMESTAMP_", .), .cols = matches("^\\d+$")) %>% 
+  pivot_longer(cols = starts_with("unix_"), names_to = "TIMESTAMP_LABEL", values_to = "TIMESTAMP") %>%
+  pivot_longer(cols = starts_with("value_"), names_to = "VALUE_LABEL", values_to = "VALUE") %>%
+  filter(str_extract(TIMESTAMP_LABEL, "\\d+") == str_extract(VALUE_LABEL, "\\d+")) %>%
+  select(-TIMESTAMP_LABEL, -VALUE_LABEL) %>% 
+  # remove duplicate rows: all data that has repeated timestamps. this probably has to do with re-starting
+  # but we had multiple instances of the same time stamp being used for different data. 
+  # Can't know for sure which one is real, so remove all but the first occurrence of those timestamps to be safe.
+  # Use distinct() only on TIMESTAMP and sensor, keeping all other data intact
+  group_by(TIMESTAMP, sensor) %>%
+  filter(row_number() == 1) %>%  # Keep only the first occurrence of each TIMESTAMP-sensor combination
+  ungroup() %>%
+  pivot_wider(names_from = sensor, values_from = VALUE) %>% 
+  select(TIMESTAMP, co2, pressure, humidity, temprerature) %>% 
+  rename(., temperature = temprerature)
+
+```
+
+Adjust timestamps as necessary for each bot using field notes:
+
+```{r}
+#| echo: false
+
+```
+
+Add Berry Hill met data by timestamp:
+
+```{r}
+#| echo: false
+# Define a function to apply the process to a single data frame
+
+# NOTE: going to need to add the pressure data after we've corrected the timestamps, otherwise joining by unix time won't work
+```
+
+Produce flux estimates using existing start_end file and cleaned offline bot dataset:
+
+#################################################################### 
+
+## Situate flux estimates by location: adding meta-data
+
+Each fluxbot was deployed strategically in a given treatment (forest cover) and has associated meta-data collected in situ by field researchers (Jon Gewirtzman, Erin Lefkowitz, and Elizabeth Forbes) like average organic layer depth. These data need to be added to each fluxbot's dataset.
+
+Upload meta-data:
+
+```{r}
+
+```

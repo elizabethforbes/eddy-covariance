@@ -1,0 +1,15 @@
+"0","vpdcalc <- all_ec_filtered %>% 
+  select(management, date, month, hour, airt, rh, VPD) %>% 
+  # arrange(management, date, month, hour) %>% 
+  # group_by(management) %>% 
+  mutate(
+    VPD_eddypro_Pa = es - e,
+    VPD_eddypro_kPa = (es - e)/1000
+  )
+"
+"1","[1m[33mError[39m in `mutate()`:[22m
+[38;5;232m[36mℹ[38;5;232m In argument: `VPD_eddypro_Pa = es - e`.[39m
+[1mCaused by error:[22m
+[33m![39m object 'es' not found
+[90mRun `]8;;x-r-run:rlang::last_trace()rlang::last_trace()]8;;` to see where the error occurred.[39m
+"

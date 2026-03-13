@@ -4,7 +4,7 @@ author: "Elizabeth Forbes"
 format: html
 editor: visual
 execute:
-  echo: false       # hides code
+  echo: true       # shows code (or hides, if false)
   warning: false    # hides warnings
   message: false    # hides messages
   error: false      # hides errors (optional, use carefully)
@@ -53,7 +53,7 @@ ec_daily_mngmnt2$crop_stage_simple <- factor(
 ec_daily_mngmnt2$year <- as.factor(ec_daily_mngmnt2$year)
 ```
 
-## Define stress threshold using VPD (vapor pressure density) data:
+## Define stress threshold using VPD (vapor pressure deficit) data:
 ```{r}
 # use quantile function to find upper and lower quantiles of each VPD and average soil moisture (VWC), determine if there exists drought stress based on if a line has both higher than average VPD and lower than average VWC: 
 ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>%
@@ -63,10 +63,54 @@ ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>%
   )
 ```
 
+## Alt: Define drought using US Drought Monitoring Index
+https://www.drought.gov/data-maps-tools/us-drought-monitor
+https://droughtmonitor.unl.edu/DmData/DataDownload/ComprehensiveStatistics.aspx
+All data are in percent area of each drought category for the time period (one week). Match the dates to the EC data.
+```{r}
+usdm <- read_csv("USDM_ColumbiaCountyNY.csv")
+usdm$start <- as.Date(usdm$start, format = "%m/%d/%y")
+usdm$end <- as.Date(usdm$end, format = "%m/%d/%y")
+usdm <- usdm %>% 
+  select(!c(County, State))
+
+# expand using seq() to create a row for each date within each week-long period (demarcated by the start and end columns in each existing row) and copy/paste the drought data for that week to each date within the week:
+usdm_exp <- usdm %>%
+  rowwise() %>%
+  mutate(date = list(seq.Date(start, end, by = "day"))) %>%
+  unnest(cols = c(date)) %>%
+  ungroup()
+
+# categorize each day's drought level by the percentage area of each drought category:
+# D0 = abnormally dry, pre-drought; D1 = Moderate; D2 = Severe; D3 = Extreme; D4 = Exceptional
+usdm_exp <- usdm_exp %>% 
+  mutate(drought_risk =
+    if_else(None > 50, "none",
+            if_else(D0_percarea > 50, "abnormally dry",
+                    if_else(D1_percarea > 50, "moderate",
+                            if_else(D2_percarea > 50, "severe",
+                                    # default drought conditions should not exist based on above logic: NA
+                                    NA)))))
+usdm_final <- usdm_exp %>% 
+  select(date, drought_risk) %>% 
+  # relevel the factors of drought
+  mutate(drought_risk = fct_relevel(drought_risk, c("none", "abnormally dry", "moderate")))
+
+# bind the USDM drought risk data to the average hourly management data using time stamps
+ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>% 
+  left_join(usdm_final) %>% 
+  # rename drought columns for clarity:
+  rename(calculated_drought = drought_stress,
+         usdm_drought = drought_risk)
+  # re-level the factors
+
+```
+
+
 ## Model NEE with stress indicator:
 ```{r}
 g_resilience <- gam(NEE ~ 
-                    management * crop_stage_simple * drought_stress +
+                    management * crop_stage_simple *  usdm_drought +
                       
                     s(year, bs = "re", by = management) +
                     s(doy, bs = "cc", k = 20) +
@@ -80,12 +124,16 @@ g_resilience <- gam(NEE ~
                   method = "REML")
 
 appraise(g_resilience)
+```
+
+summary statistics of model
+```{r}
 summary(g_resilience)
 ```
 
 ## Test hypothesis: Organic has advantage in NEE response during drought
 ```{r}
-emm <- emmeans(g_resilience, ~ management | drought_stress | crop_stage_simple)
+emm <- emmeans(g_resilience, ~ management | usdm_drought | crop_stage_simple)
 contrast(emm, method = "pairwise")  # Is organic advantage BIGGER during drought?
 
 ```
@@ -118,7 +166,7 @@ pred_grid <- expand.grid(
             length.out = 100),
   management = c("conventional", "organic"),
   crop_stage_simple = "vegetative",  # Hold at key stage
-  drought_stress = FALSE, # this will be overridden by VPD value
+  usdm_drought = "none", # this will be overridden by VPD value
   # Set other variables at median
   soilt_avg = median(ec_daily_mngmnt2$soilt_avg, na.rm = TRUE),
   vwc_avg = median(ec_daily_mngmnt2$vwc_avg, na.rm = TRUE),
@@ -220,7 +268,7 @@ pred_by_year_specific <- expand.grid(
   left_join(year_medians, by = c("year", "management")) %>%
   mutate(
     crop_stage_simple = factor("vegetative"),
-    drought_stress = FALSE,
+    usdm_drought = "none",
     soilt_avg = median_soilt,
     vwc_avg = median_vwc,
     doy = median_doy,
@@ -266,6 +314,7 @@ year_effects_summary <- difference_by_year_specific %>%
   ) %>%
   arrange(desc(mean_VPD))
 
+year_effects_summary
 ```
 
 ```{r}
@@ -289,6 +338,7 @@ ggplot(pred_by_year_specific, aes(x = VPD, y = NEE, color = management)) +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom")
 ```
+
 ```{r}
 # PLOT 2: Management Difference by Year
 # Shows organic advantage/disadvantage across VPD for each year
@@ -398,8 +448,8 @@ year_effects_sum_long %>%
 ```
 ## Simple t-test comparison
 ```{r}
-# Test: Is organic advantage different in drought vs. normal years?
-# At high VPD (>75th percentile)
+# Test: Is organic advantage different in drought vs. normal years when VPD is high indicating challenging drought conditions?
+# Simple t-test: for those instances of high VPD, or VPD over the 75th quantile:
 
 high_vpd_threshold <- quantile(ec_daily_mngmnt2$VPD, 0.75, na.rm = TRUE)
 
@@ -414,18 +464,21 @@ high_vpd_comparison <- difference_by_year_specific %>%
 
 
 ```{r}
-# Simple t-test: for those instances of high VPD, or VPD over the 75th quantile:
-# Hypothesis 1: the mean difference in NEE between organic and conventional is greater in drought years than non-drought years.
+
+# Hypothesis 1: the mean difference in NEE between organic and conventional is greater in drought years than non-drought years when VPD is high
 t.test(difference_flipped ~ year_type, data = high_vpd_comparison)
 # mean in group Drought  mean in group Normal 
 #             2.2886807             0.8195983 
 # t = 4.9727, df = 457.22, p-value = 9.356e-07
+```
 
-# Hypothesis 2: for those instances of high VPD, the mean difference in NEE between organic and conventional is greater in drought years compared to non-drought years.
+
+```{r}
+# Hypothesis 2: the mean difference in NEE between organic and conventional is greater in drought years compared to non-drought years across all VPD conditions
 t.test(difference_flipped ~ year_type, data = difference_by_year_specific)
 # mean in group Drought  mean in group Normal 
 #             2.2886807             0.8195983 
-# t = 4.9727, df = 457.22, p-value = 9.356e-07
+# t = 8.2442, df = 456.65, p-value = 1.782e-15
 
 ```
 

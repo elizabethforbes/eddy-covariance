@@ -4,7 +4,7 @@ author: "Elizabeth Forbes"
 format: html
 editor: visual
 execute:
-  echo: false       # hides code
+  echo: true       # shows code
   warning: false    # hides warnings
   message: false    # hides messages
   error: false      # hides errors (optional, use carefully)
@@ -161,6 +161,53 @@ ec_daily_mngmnt2 %>%
 <!--             by = join_by(management, date)) -->
 
 <!-- ``` -->
+
+### Gantt chart of crop rotations:
+
+```{r}
+
+# Convert date to proper format
+mngmnt$date <- as.Date(mngmnt$date, format = "%m/%d/%y")
+mngmnt$duration <- as.numeric(mngmnt$duration)
+mngmnt <- mngmnt %>% 
+  mutate(site = case_when(field == 'EF01' ~ 'organic',
+                          field == 'EF02' ~ 'conventional',
+                          field == 'EF03' ~ 'dairy pasture'))
+
+mngmnt %>% 
+    filter(site != "dairy pasture") %>% # comment out for all three including pasture
+  ggplot(aes(x = date, y = site, color = crop)) +
+  geom_point(size = 5, alpha = 0.75,
+             position = ggstance::position_dodgev(height = 0.7)) +
+  scale_x_date(date_labels = "%d %b %Y") +
+  theme_minimal() +
+  labs(title = "Crop Rotations: Organic and Conventional Grains",
+       x = "", y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_brewer(palette = "RdYlBu")
+```
+
+### Gantt chart of other management activities:
+
+```{r}
+mngmnt %>% 
+  # filter(year == 2019 | year == 2020) %>% 
+  filter(site != "dairy pasture") %>% # comment out for all three including pasture
+  ggplot(aes(x = date, y = site, color = category)) +
+  geom_point(size = 5, alpha = 0.75,
+             position = ggstance::position_dodgev(height = 0.7)) +
+  # geom_linerange(aes(xmin = date, xmax = date+duration),
+  #                # size = 5,
+  #                linewidth = 5,
+  #                # alpha = 0.75,
+  #                position = ggstance::position_dodgev(height = 0.7))+
+  scale_x_date(date_labels = "%d %b %Y") +
+  theme_minimal() +
+  labs(title = "Farm Management Activities Timeline",
+       x = "", y = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_brewer(palette = "RdYlBu")
+```
 
 # Analyses
 
@@ -490,13 +537,13 @@ r1.3 <- gam(Reco ~
           method = "REML")
 
 AIC(r1, r1.2, r1.3)
-# r1	  70.46897	5430.100		
-# r1.2	92.54523	5392.568		
-# r1.3	98.64308	5312.992	
+# r1	77.71198	4843.723		
+# r1.2	96.96036	4802.378		
+# r1.3	103.57715	4774.922	
 
 anova(r1.2, r1.3)
-# 1    1681.9     1926.5                                     
-# 2    1675.8     1830.1 6.1159   96.383 14.658 < 2.2e-16 ***
+# 1    1679.8       1378                                     
+# 2    1673.2       1347 6.5849   31.006 5.9219 1.555e-06 ***
 
 # same model structure as for daily average NEE
 ```
@@ -517,7 +564,7 @@ summary(r1.3)
 
 ##### Interpretation, linear variables:
 
-Note: baseline comparison to conventional management and mature crop stage (estimated Reco = 3.07)
+Note: baseline comparison to conventional management and mature crop stage (estimated Reco = 3.55)
 
 Organic management has a significant effect on Reco baseline (conventional, mature) overall of about 1 unit. The crop stage also has significant effects on Reco -- vegetative, reproductive, and grain fill respectively. The interactions between crop stage and management is also significant, for grain fill and trending that way for dormant. Again, the interaction coefficient tells us how much more or less the difference between that crop stage, and the baseline (mature), changes under organic compared to conventional management
 
@@ -568,7 +615,7 @@ ggplot(newdata, aes(x = crop_stage_simple, y = fit, color = management, group = 
 
 ```{r GPPmod_development}
 
-p1 <- gam(GPP_f ~ 
+p1 <- gam(GPP ~ 
             management +
             crop_stage_simple +
             s(year, bs = "re", by = as.factor(management)) + # random effect of year
@@ -583,7 +630,7 @@ p1 <- gam(GPP_f ~
           method = "REML")
 
 # plus interaction of vwc and soil temp:
-p1.2 <- gam(GPP_f ~ 
+p1.2 <- gam(GPP ~ 
             management +
             crop_stage_simple +
             s(year, bs = "re", by = as.factor(management)) + # random effect of year
@@ -600,7 +647,7 @@ p1.2 <- gam(GPP_f ~
           method = "REML")
 
 # add interaction term between crop stage and management:
-p1.3 <- gam(GPP_f ~ 
+p1.3 <- gam(GPP ~ 
             management * # interaction
             crop_stage_simple +
             s(year, bs = "re", by = as.factor(management)) + # random effect of year

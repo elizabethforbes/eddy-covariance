@@ -1,0 +1,978 @@
+# =============================================================================
+# create_management_vars_multicrop()
+#
+# Crop stage determination for cover crops (winter rye) and alfalfa uses
+# air temperature (air_temperature) + NDVI, smoothed with a 7-day rolling
+# mean grouped by management field.
+#
+# ERA5-modeled NDVI is used for phenological staging only (not flux modeling).
+# Air temperature is from the eddy covariance tower.
+#
+# Cover crop cases:
+#   - Winter-planted rye  (planted Sept–Nov): uses fall tillering logic
+#   - Summer-planted rye  (planted Jul–Aug):  uses annual-then-overwinter logic
+#     detected via planting month (July/August = summer-planted)
+#
+# Alfalfa: days-since-planting/harvest logic with temperature-based dormancy
+#   override. After breaking dormancy, reverts to days-since-harvest logic.
+#
+# NDVI slope (7-day rolling) is used to detect shoot elongation vs vegetative
+#   transition in alfalfa rapid growth phase.
+# =============================================================================
+
+library(dplyr)
+library(zoo)
+library(lubridate)
+
+
+# =============================================================================
+# HELPER: Assign cover crop stages (iterative, temperature+NDVI aware)
+# Called on a single field x crop-season subset, already sorted by date.
+# Expects columns: date, ndvi_smooth, air_temp_smooth, days_since_planting,
+#                  planting_month, termination_date (Date or NA)
+# Returns a character vector of stages, same length as nrow(df).
+# =============================================================================
+
+assign_cover_crop_stages <- function(df) {
+
+  n <- nrow(df)
+  stage <- rep(NA_character_, n)
+  current_phase <- NA_character_
+  cc_dormancy_entry_date <- as.Date(NA)  # date cover crop entered dormant phase
+
+  # Ordered phases for forward-only progression
+  # Summer-planted has more pre-dormancy phases; winter-planted skips straight
+  # to fall tillering after emergence.
+  # Warm-season planted: any cover crop planted March-August follows the
+  # day-count arc (germination -> seedling -> vegetative -> flowering ->
+  # seed production -> mature -> dormancy). This covers both the July/August
+  # summer-planted case and the April spring-planted case (e.g. co-planted
+  # with barley). Fall/winter-planted (Sept-Nov) uses temp+NDVI throughout.
+  warm_season_planted <- df$planting_month[1] %in% c(3L, 4L, 5L, 6L, 7L, 8L)
+
+  if (warm_season_planted) {
+    phase_order <- c(
+      "germination/emergence",
+      "seedling",
+      "vegetative",
+      "flowering",
+      "seed production",
+      "mature",
+      "dormant",
+      "spring growth",
+      "rapid growth",
+      "terminated"
+    )
+  } else {
+    phase_order <- c(
+      "pre-planting",
+      "germination/emergence",
+      "fall tillering",
+      "dormant",
+      "spring growth",
+      "rapid growth",
+      "terminated"
+    )
+  }
+
+  get_idx <- function(p) match(tolower(p), phase_order)
+
+  for (i in seq_len(n)) {
+
+    d      <- df$date[i]
+    ndvi   <- df$ndvi_smooth[i]
+    airt_7 <- df$air_temp_smooth_7[i]   # 7-day smooth: used for dormancy entry
+    airt_10 <- df$air_temp_smooth_10[i] # 10-day smooth: used for spring exit
+    soilt  <- df$soil_temp_smooth[i]
+    dsp    <- df$days_since_planting[i]
+    term   <- df$termination_date[i]    # may be NA
+
+    # ---- Insufficient data ----
+    # Only require airt_7 for insufficient data flag; airt_10 may be NA at
+    # start of record (needs 10 days) without meaning the data is missing
+    if (is.na(ndvi) | is.na(airt_7) | is.na(d)) {
+      stage[i] <- "insufficient data"
+      next
+    }
+
+    # ---- Terminated ----
+    if (!is.na(term) && d >= term) {
+      current_phase <- "terminated"
+      stage[i] <- current_phase
+      next
+    }
+
+    new_phase <- NA_character_
+
+    if (warm_season_planted) {
+      # ------------------------------------------------------------------
+      # WARM-SEASON-PLANTED RYE (March-August): date-driven pre-dormancy,
+      # then temp+NDVI for any overwintering phase
+      # ------------------------------------------------------------------
+      if (is.na(dsp) || dsp < 0) {
+        new_phase <- "germination/emergence"
+      } else if (dsp <= 10) {
+        new_phase <- "germination/emergence"
+      } else if (dsp <= 30) {          # ~2-3 weeks seedling
+        new_phase <- "seedling"
+      } else if (dsp <= 72) {          # ~6 weeks vegetative
+        new_phase <- "vegetative"
+      } else if (dsp <= 97) {          # ~25 days flowering
+        new_phase <- "flowering"
+      } else if (dsp <= 122) {         # ~25 days seed production
+        new_phase <- "seed production"
+      } else {
+        # Post-seed-production: temp+NDVI decide dormancy and spring recovery
+        # Use 7-day smooth for dormancy entry, 10-day for spring exit
+        # NOTE: parentheses are essential — & binds tighter than | in R
+        if ((ndvi < 0.20) & (airt_7 < 0.55)) {
+          new_phase <- "dormant"
+        } else if (!is.na(current_phase) &&
+                   (current_phase %in% c("dormant")) &&
+                   (!is.na(airt_10) & airt_10 > 5) &
+                   (ndvi > 0.25)) {
+          new_phase <- "rapid growth"
+        } else if (!is.na(current_phase) &&
+                   (current_phase %in% c("dormant", "spring growth")) &&
+                   (!is.na(airt_10) & airt_10 > 1.5) &
+                   (ndvi > 0.20)) {
+          new_phase <- "spring growth"
+        } else {
+          new_phase <- "mature"   # holding phase between seed production and dormancy
+        }
+      }
+
+    } else {
+      # ------------------------------------------------------------------
+      # FALL/WINTER-PLANTED RYE (Sept-Nov): temp+NDVI throughout
+      # Use 7-day smooth for dormancy entry, 10-day for spring exit
+      # NOTE: parentheses are essential -- & binds tighter than | in R
+      # ------------------------------------------------------------------
+      if (is.na(dsp) || dsp < -1) {
+        new_phase <- "pre-planting"
+      } else if (dsp <= 10) {
+        new_phase <- "germination/emergence"
+      } else if ((ndvi < 0.20) & (airt_7 < 0.55)) {
+        # Record dormancy entry date on first transition to dormant
+        if (is.na(cc_dormancy_entry_date) ||
+            (!is.na(current_phase) && current_phase != "dormant")) {
+          cc_dormancy_entry_date <- as.Date(d)
+        }
+        new_phase <- "dormant"
+      } else if (!is.na(current_phase) &&
+                 (current_phase %in% c("dormant", "spring growth")) &&
+                 # Calendar gate: no spring exit before Feb 1 of year after dormancy entry
+                 (!is.na(cc_dormancy_entry_date)) &
+                 (as.Date(d) >= as.Date(paste0(year(cc_dormancy_entry_date) + 1L, "-02-01"))) &
+                 (!is.na(airt_10) & airt_10 > 5) &
+                 (ndvi > 0.25)) {
+        new_phase <- "rapid growth"
+      } else if (!is.na(current_phase) &&
+                 (current_phase %in% c("dormant")) &&
+                 # Calendar gate: no spring exit before Feb 1 of year after dormancy entry
+                 (!is.na(cc_dormancy_entry_date)) &
+                 (as.Date(d) >= as.Date(paste0(year(cc_dormancy_entry_date) + 1L, "-02-01"))) &
+                 (!is.na(airt_10) & airt_10 > 1) &
+                 (ndvi > 0.20)) {
+        new_phase <- "spring growth"
+      } else if ((airt_7 >= 0.55) & (ndvi >= 0.20)) {
+        new_phase <- "fall tillering"
+      } else {
+        new_phase <- "fall tillering"  # default active phase pre-dormancy
+      }
+    }
+
+    # ---- Forward-only phase progression ----
+    if (is.na(current_phase)) {
+      current_phase <- new_phase
+    } else if (!is.na(new_phase)) {
+      # Special: never go dormant -> fall tillering (backward)
+      if (current_phase == "dormant" & new_phase == "fall tillering") {
+        cat(sprintf("[Cover crop] Ignored backward dormant->fall tillering on %s\n", d))
+        # keep current_phase
+      } else if (get_idx(new_phase) > get_idx(current_phase)) {
+        cat(sprintf("[Cover crop] %s -> %s on %s\n", current_phase, new_phase, d))
+        current_phase <- new_phase
+      }
+      # same phase or backward (other): keep current_phase
+    }
+
+    stage[i] <- current_phase
+  }
+
+  return(stage)
+}
+
+
+# =============================================================================
+# HELPER: Assign alfalfa stages (days-since logic with temp-based dormancy
+# override). Called on a single field x alfalfa-season subset, sorted by date.
+# Expects columns: date, ndvi_smooth, air_temp_smooth_7, air_temp_smooth_10,
+#                  soil_temp_smooth, ndvi_slope,
+#                  days_since_planting, days_since_last_harvest_same_crop
+# Returns a character vector of stages.
+#
+# Key design decisions:
+#   - Calendar gate: spring exit (spring growth / rapid growth) cannot trigger
+#     before Feb 1, preventing October warm spells from false-triggering green-up
+#   - Minimum days in dormancy window (30 days) before spring exit is allowed,
+#     preventing single-day temperature blips from ending dormancy prematurely
+#   - dormancy_exit_date: tracked when in_dormancy_window flips FALSE; used as
+#     a proxy for last harvest date when no harvest has occurred yet, so that
+#     post-dormancy spring stages (bud, flowering, maturity) are driven by
+#     days-since-dormancy-exit rather than days-since-planting
+# =============================================================================
+
+assign_alfalfa_stages <- function(df) {
+
+  n <- nrow(df)
+  stage <- rep(NA_character_, n)
+  current_phase <- NA_character_
+
+  # Ordered for forward-only dormancy/spring logic
+  dormancy_phase_order <- c(
+    "fall hardening",
+    "dormant",
+    "spring growth",
+    "rapid growth"
+  )
+  get_dormancy_idx <- function(p) match(tolower(p), dormancy_phase_order)
+
+  # Track dormancy window state
+  in_dormancy_window  <- FALSE
+  dormancy_entry_date <- as.Date(NA)  # date we entered the dormancy window
+  dormancy_exit_date  <- as.Date(NA)  # date rapid growth was first reached
+  hardening_days      <- 0L           # consecutive days meeting fall hardening
+                                      # thresholds; must reach 3 before confirmed
+
+  for (i in seq_len(n)) {
+
+    d       <- df$date[i]
+    ndvi    <- df$ndvi_smooth[i]
+    airt_7  <- df$air_temp_smooth_7[i]   # 7-day smooth: dormancy entry
+    airt_10 <- df$air_temp_smooth_10[i]  # 10-day smooth: spring exit
+    soilt   <- df$soil_temp_smooth[i]
+    dsp     <- df$days_since_planting[i]
+    dsh     <- df$days_since_last_harvest_same_crop[i]
+    slope   <- df$ndvi_slope[i]          # 7-day rolling NDVI slope (units/day)
+
+    # Only require airt_7 for insufficient data; airt_10 NA at record start is ok
+    if (is.na(airt_7) | is.na(ndvi) | is.na(d)) {
+      stage[i] <- "insufficient data"
+      next
+    }
+
+    mo <- month(d)
+
+    # ------------------------------------------------------------------
+    # TEMPERATURE-BASED DORMANCY OVERRIDE (takes priority over days logic)
+    # Applied Oct-Apr to avoid false dormancy flags in summer.
+    # NOTE: parentheses are essential -- & binds tighter than | in R
+    # ------------------------------------------------------------------
+
+    if (mo %in% c(10L, 11L, 12L, 1L, 2L, 3L, 4L)) {
+
+      # Entering dormancy window
+      if (!in_dormancy_window) {
+        # Fall hardening: 4.4-10 degrees C, months Oct/Nov only.
+        # Require 3 consecutive days meeting threshold before confirming,
+        # to prevent single-day temperature blips from triggering hardening.
+        if ((airt_7 >= 4.4) & (airt_7 <= 10) & (mo %in% c(10L, 11L))) {
+          hardening_days <- hardening_days + 1L
+          if (hardening_days >= 3L) {
+            in_dormancy_window  <- TRUE
+            dormancy_entry_date <- as.Date(d)
+            current_phase <- "fall hardening"
+            stage[i] <- current_phase
+            next
+          } else {
+            # Not yet confirmed -- stay in current days-based phase
+            stage[i] <- current_phase
+            next
+          }
+        } else {
+          # Condition broken -- reset counter
+          hardening_days <- 0L
+        }
+        # Direct to dormant: temperature-only gate. NDVI excluded because
+        # alfalfa maintains canopy greenness through winter via persistent root
+        # reserves, so ERA5 NDVI frequently stays above 0.20 even when the
+        # plant is physiologically dormant -- making it an unreliable gate.
+        # airt_7 < 0 degrees C is the primary signal; soil temp is a secondary
+        # confirmation when available.
+        if ((airt_7 < 0) | (!is.na(soilt) & soilt < 4)) {
+          in_dormancy_window  <- TRUE
+          dormancy_entry_date <- as.Date(d)
+          current_phase <- "dormant"
+          stage[i] <- current_phase
+          next
+        }
+      }
+
+      if (in_dormancy_window) {
+
+        # Days spent in dormancy window so far
+        days_in_dormancy <- as.numeric(as.Date(d) - dormancy_entry_date)
+
+        # Spring exit conditions:
+        #   (1) Calendar gate: no spring exit before Feb 1
+        #   (2) Minimum 30 days in dormancy window (prevents single warm-day blips)
+        #   (3) Temperature + NDVI thresholds
+        spring_exit_allowed <- (!is.na(dormancy_entry_date)) &
+                               (as.Date(d) >= as.Date(paste0(year(dormancy_entry_date) + 1L, "-02-01"))) &
+                               (days_in_dormancy >= 30)
+
+        # Spring recovery sequence (forward-only)
+        # Rapid growth: sustained warmth AND rising NDVI slope
+        if (spring_exit_allowed &&
+            !is.na(current_phase) &&
+            (current_phase %in% c("dormant", "fall hardening", "spring growth")) &&
+            ((!is.na(airt_10) & airt_10 > 10) | (!is.na(soilt) & soilt > 5)) &
+            (!is.na(slope) & slope > 0.003)) {
+          new_dorm_phase <- "rapid growth"
+        # Spring growth: sustained warmth, NDVI recovering.
+        # NDVI threshold raised to 0.30 to clear winter noise ceiling
+        # (ERA5 NDVI sits at 0.20-0.28 during winter bumps in both fields).
+        } else if (spring_exit_allowed &&
+                   !is.na(current_phase) &&
+                   (current_phase %in% c("dormant", "fall hardening")) &&
+                   ((!is.na(airt_10) & airt_10 > 5) | (!is.na(soilt) & soilt > 5)) &
+                   (ndvi > 0.30)) {
+          new_dorm_phase <- "spring growth"
+        # Stay dormant: temperature-only, consistent with entry condition
+        } else if (airt_7 < 0) {
+          new_dorm_phase <- "dormant"
+        } else if (!is.na(current_phase) && current_phase == "fall hardening") {
+          new_dorm_phase <- "fall hardening"  # stay
+        } else {
+          new_dorm_phase <- current_phase     # stay
+        }
+
+        # Forward-only within dormancy sequence
+        if (!is.na(current_phase) && !is.na(new_dorm_phase)) {
+          cur_idx <- get_dormancy_idx(current_phase)
+          new_idx <- get_dormancy_idx(new_dorm_phase)
+          if (!is.na(new_idx) && !is.na(cur_idx) && new_idx > cur_idx) {
+            cat(sprintf("[Alfalfa dormancy] %s -> %s on %s\n", current_phase, new_dorm_phase, d))
+            current_phase <- new_dorm_phase
+          }
+          # never go backward (e.g. spring growth -> dormant)
+        }
+
+        # Once we reach rapid growth, exit dormancy window and record exit date
+        if (!is.na(current_phase) && current_phase == "rapid growth" && in_dormancy_window) {
+          in_dormancy_window <- FALSE
+          dormancy_exit_date <- as.Date(d)
+          cat(sprintf("[Alfalfa] Dormancy window exited on %s\n", d))
+        }
+
+        stage[i] <- current_phase
+        next
+      }
+    } else {
+      # Outside Oct-Apr: exit dormancy window if still in it
+      if (in_dormancy_window) {
+        in_dormancy_window <- FALSE
+        dormancy_exit_date <- as.Date(d)
+      }
+    }
+
+    # ------------------------------------------------------------------
+    # DAYS-BASED LOGIC (non-dormancy periods)
+    #
+    # Priority for regrowth clock:
+    #   1. days_since_last_harvest_same_crop (dsh) -- if a harvest has occurred
+    #   2. days since dormancy_exit_date -- if dormancy has been exited but no
+    #      harvest yet (first-year alfalfa coming out of winter)
+    #   3. days_since_planting (dsp) -- true establishment phase only
+    #      (before first dormancy window)
+    # ------------------------------------------------------------------
+
+    # Days since dormancy exit (NA if dormancy not yet exited)
+    dse <- if (!is.na(dormancy_exit_date)) as.numeric(as.Date(d) - dormancy_exit_date) else NA_real_
+
+    if (!is.na(dsh)) {
+      # Post-harvest regrowth
+      # Within rapid growth (post-dormancy spring), use NDVI slope to detect
+      # transition to vegetative when growth rate slows
+      # slope < 0.003 NDVI units/day = growth plateauing
+      if (!is.na(current_phase) && current_phase == "rapid growth") {
+        if (!is.na(slope) && slope < 0.003) {
+          current_phase <- "vegetative"
+        }
+        # else stay in rapid growth / shoot elongation
+      } else if (dsh >= 0 & dsh <= 5) {
+        current_phase <- "post_cut_recovery"
+      } else if (dsh > 5 & dsh <= 10) {
+        current_phase <- "seedling_regrowth"
+      } else if (dsh > 10 & dsh <= 30) {
+        current_phase <- "vegetative"
+      } else if (dsh > 30 & dsh <= 35) {
+        current_phase <- "bud"
+      } else if (dsh > 35 & dsh <= 65) {
+        current_phase <- "flowering"
+      } else if (dsh > 65) {
+        current_phase <- "maturity"
+      }
+
+    } else if (!is.na(dse)) {
+      # Post-dormancy, pre-first-harvest: use days since dormancy exit
+      # to drive spring recovery stages. Early days use spring growth label
+      # (not post_cut_recovery / seedling_regrowth, which imply a harvest
+      # occurred) before transitioning to the standard bud/flowering/maturity arc.
+      if (!is.na(current_phase) && current_phase == "rapid growth") {
+        if (!is.na(slope) && slope < 0.003) {
+          current_phase <- "vegetative"
+        }
+      } else if (dse >= 0 & dse <= 10) {
+        current_phase <- "spring growth"   # early green-up, no cut has occurred
+      } else if (dse > 10 & dse <= 30) {
+        current_phase <- "vegetative"
+      } else if (dse > 30 & dse <= 35) {
+        current_phase <- "bud"
+      } else if (dse > 35 & dse <= 65) {
+        current_phase <- "flowering"
+      } else if (dse > 65) {
+        current_phase <- "maturity"
+      }
+
+    } else {
+      # True establishment phase: before first dormancy window, use days
+      # since planting
+      if (is.na(dsp) || dsp < 0) {
+        current_phase <- "germination"
+      } else if (dsp <= 10) {
+        current_phase <- "germination"
+      } else if (dsp <= 30) {
+        current_phase <- "seedling"
+      } else if (dsp <= 72) {
+        current_phase <- "vegetative"
+      } else if (dsp <= 93) {
+        current_phase <- "flowering"
+      } else if (dsp <= 128) {
+        current_phase <- "seed production"
+      } else {
+        current_phase <- "maturity"
+      }
+    }
+
+    stage[i] <- current_phase
+  }
+
+  return(stage)
+}
+
+# =============================================================================
+# MAIN FUNCTION
+# =============================================================================
+
+create_management_vars_multicrop <- function(data, events) {
+
+  # Ensure the column name matches between data and events
+  if ("field" %in% names(events) && !"management" %in% names(events)) {
+    events <- events %>% rename(management = field)
+  }
+  if ("field" %in% names(data) && !"management" %in% names(data)) {
+    data <- data %>% rename(management = field)
+  }
+
+  result <- data
+
+  # =========================================================================
+  # STEP 1: Identify current crop for each date/field
+  # =========================================================================
+
+  planting_events <- events %>%
+    filter(category == "planting") %>%
+    select(management, plant_date = date, crop) %>%
+    arrange(management, plant_date)
+
+  harvest_events <- events %>%
+    filter(category == "harvest") %>%
+    select(management, harvest_date = date, crop) %>%
+    arrange(management, harvest_date)
+
+  current_crop_info <- lapply(1:nrow(result), function(i) {
+    row_field <- result$management[i]
+    row_date  <- result$date[i]
+
+    recent_plants <- planting_events %>%
+      filter(management == row_field, plant_date <= row_date) %>%
+      # Cover crop is deprioritized so that a co-planted primary crop (e.g.
+      # barley interseeded with cover crop) takes precedence. Within each
+      # priority tier, most recent planting date wins as before.
+      mutate(cc_priority = if_else(crop == "cover crop", 1L, 0L)) %>%
+      arrange(cc_priority, desc(plant_date)) %>%
+      select(-cc_priority)
+
+    if (nrow(recent_plants) == 0) {
+      return(list(crop = NA_character_, plant_date = as.Date(NA),
+                  harvest_date = as.Date(NA), in_season = 0,
+                  crop_type = NA_character_))
+    }
+
+    recent_harvests <- harvest_events %>%
+      filter(management == row_field, harvest_date <= row_date) %>%
+      arrange(desc(harvest_date))
+
+    for (j in 1:nrow(recent_plants)) {
+      this_plant <- recent_plants[j, ]
+
+      # Perennial: never ended by harvest
+      if (this_plant$crop == "alfalfa hay") {
+        return(list(crop = this_plant$crop,
+                    plant_date = this_plant$plant_date,
+                    harvest_date = as.Date(NA),
+                    in_season = 1,
+                    crop_type = "perennial"))
+      }
+
+      # Annual: check if harvest has ended the season
+      matching_harvest <- recent_harvests %>%
+        filter(crop == this_plant$crop, harvest_date > this_plant$plant_date) %>%
+        slice(1)
+
+      if (nrow(matching_harvest) == 0) {
+        # Cover crop special case: no harvest event recorded, so check for a
+        # tillage event at least 60 days after planting. If one exists on or
+        # before row_date, the season is closed and this planting is inactive.
+        if (this_plant$crop == "cover crop") {
+          tillage_term <- events %>%
+            filter(category == "tillage",
+                   management == row_field,
+                   date >= this_plant$plant_date + lubridate::days(60),
+                   date <= row_date) %>%
+            arrange(date)
+          if (nrow(tillage_term) > 0) {
+            # Season ended by tillage -- treat as closed, continue to next planting
+            next
+          }
+        }
+        return(list(crop = this_plant$crop,
+                    plant_date = this_plant$plant_date,
+                    harvest_date = as.Date(NA),
+                    in_season = 1,
+                    crop_type = "annual"))
+      }
+
+      if (matching_harvest$harvest_date > row_date) {
+        return(list(crop = this_plant$crop,
+                    plant_date = this_plant$plant_date,
+                    harvest_date = matching_harvest$harvest_date,
+                    in_season = 1,
+                    crop_type = "annual"))
+      }
+    }
+
+    last_plant   <- recent_plants[1, ]
+    last_harvest <- recent_harvests %>% filter(crop == last_plant$crop) %>% slice(1)
+
+    return(list(crop = NA_character_,
+                plant_date = last_plant$plant_date,
+                harvest_date = if (nrow(last_harvest) > 0) last_harvest$harvest_date else as.Date(NA),
+                in_season = 0,
+                crop_type = "fallow"))
+  })
+
+  result$current_crop         <- sapply(current_crop_info, function(x) x$crop)
+  result$current_plant_date   <- as.Date(sapply(current_crop_info, function(x) x$plant_date),   origin = "1970-01-01")
+  result$current_harvest_date <- as.Date(sapply(current_crop_info, function(x) x$harvest_date), origin = "1970-01-01")
+  result$in_season            <- sapply(current_crop_info, function(x) x$in_season)
+  result$crop_type            <- sapply(current_crop_info, function(x) x$crop_type)
+
+  # =========================================================================
+  # STEP 2: Management events (tillage, fertilizer, herbicide)
+  # =========================================================================
+
+  for (event_type_name in c("tillage", "fertilizer", "herbicide")) {
+
+    type_events    <- events %>% filter(category == event_type_name) %>%
+      select(management, event_date = date)
+    event_col_name <- paste0(event_type_name, "_event")
+    result[[event_col_name]] <- NA_integer_
+
+    if (nrow(type_events) == 0) {
+      result[[paste0("last_", event_type_name)]]       <- as.Date(NA)
+      result[[paste0("days_since_", event_type_name)]] <- NA_real_
+      next
+    }
+
+    event_occurrences <- sapply(1:nrow(result), function(i) {
+      any(type_events$management == result$management[i] &
+            type_events$event_date == result$date[i])
+    })
+    result[[event_col_name]][event_occurrences] <- 1L
+
+    last_event_dates <- sapply(1:nrow(result), function(i) {
+      relevant <- type_events %>%
+        filter(management == result$management[i],
+               event_date  <= result$date[i])
+      if (nrow(relevant) == 0) as.Date(NA) else max(relevant$event_date)
+    })
+
+    last_event_dates <- as.Date(last_event_dates, origin = "1970-01-01")
+    result[[paste0("last_", event_type_name)]]       <- last_event_dates
+    result[[paste0("days_since_", event_type_name)]] <- as.numeric(result$date - last_event_dates)
+  }
+
+  # =========================================================================
+  # STEP 2.5: Last harvest date (any type)
+  # =========================================================================
+
+  all_harvest_events <- events %>%
+    filter(category %in% c("harvest", "haying")) %>%
+    select(management, event_date = date)
+
+  if (nrow(all_harvest_events) > 0) {
+    last_harvest_dates <- sapply(1:nrow(result), function(i) {
+      relevant <- all_harvest_events %>%
+        filter(management == result$management[i], event_date <= result$date[i])
+      if (nrow(relevant) == 0) as.Date(NA) else max(relevant$event_date)
+    })
+    result$last_harvest <- as.Date(last_harvest_dates, origin = "1970-01-01")
+  } else {
+    result$last_harvest <- as.Date(NA)
+  }
+
+  # =========================================================================
+  # STEP 2.6: Last harvest date for the SAME crop (alfalfa)
+  # =========================================================================
+
+  all_harvest_events_crop <- events %>%
+    filter(category %in% c("harvest", "haying")) %>%
+    select(management, crop, event_date = date)
+
+  last_harvest_same_crop_dates <- sapply(1:nrow(result), function(i) {
+    relevant <- all_harvest_events_crop %>%
+      filter(management == result$management[i],
+             crop        == result$current_crop[i],
+             event_date  <= result$date[i])
+    if (nrow(relevant) == 0) as.Date(NA) else max(relevant$event_date)
+  })
+  result$last_harvest_same_crop <- as.Date(last_harvest_same_crop_dates, origin = "1970-01-01")
+
+  # =========================================================================
+  # STEP 3: Days since planting / harvest
+  # =========================================================================
+
+  result <- result %>%
+    mutate(
+      days_since_planting            = as.numeric(date - current_plant_date),
+      days_to_harvest                = as.numeric(current_harvest_date - date),
+      days_since_season_end_harvest  = as.numeric(date - current_harvest_date),
+      days_since_last_harvest        = as.numeric(date - last_harvest),
+      days_since_last_harvest_same_crop = ifelse(
+        current_crop == "alfalfa hay",
+        as.numeric(date - last_harvest_same_crop),
+        NA_real_
+      )
+    )
+
+  # =========================================================================
+  # STEP 3.5: Compute smoothed covariates for cover crop and alfalfa staging
+  #
+  # Two air temp windows:
+  #   air_temp_smooth_7  — 7-day rolling mean, used for dormancy ENTRY
+  #   air_temp_smooth_10 — 10-day rolling mean, used for spring EXIT
+  #     (longer window prevents January thaw false green-up triggers)
+  # soil_temp_smooth     — 7-day rolling mean of ERA5 soil temp (backup signal)
+  # ndvi_smooth          — 7-day rolling mean of ERA5 NDVI
+  # ndvi_slope           — 7-day rolling OLS slope of NDVI (units/day),
+  #                        used to detect alfalfa shoot elongation -> vegetative
+  #
+  # All computed per management field (grouped by management, sorted by date).
+  # Requires columns in `result`: airt_era5, ndvi_era5, soilt_avg_era5
+  # NOTE: all ERA5 inputs — empirical air_temperature reserved for flux analysis only
+  # =========================================================================
+
+  result <- result %>%
+    arrange(management, date) %>%
+    group_by(management) %>%
+    mutate(
+      air_temp_smooth_7  = rollapply(airt_era5, width = 7,  FUN = mean,
+                                     fill = NA, align = "right", na.rm = TRUE),
+      air_temp_smooth_10 = rollapply(airt_era5, width = 10, FUN = mean,
+                                     fill = NA, align = "right", na.rm = TRUE),
+      ndvi_smooth        = rollapply(ndvi_era5,       width = 7,  FUN = mean,
+                                     fill = NA, align = "right", na.rm = TRUE),
+      soil_temp_smooth   = rollapply(soilt_avg_era5,  width = 7,  FUN = mean,
+                                     fill = NA, align = "right", na.rm = TRUE),
+      ndvi_slope         = rollapply(ndvi_era5, width = 7,
+                                     FUN = function(x) {
+                                       if (sum(!is.na(x)) < 4) return(NA_real_)
+                                       t <- seq_along(x)
+                                       coef(lm(x ~ t, na.action = na.omit))[2]
+                                     },
+                                     fill = NA, align = "right")
+    ) %>%
+    ungroup()
+
+  # =========================================================================
+  # STEP 4: CROP-SPECIFIC PHENOLOGY STAGES
+  #
+  # Cover crops and alfalfa are handled by dedicated helper functions
+  # (iterative, temperature+NDVI aware). All other crops use case_when.
+  # =========================================================================
+
+  # ---- 4a: Annual crops via case_when ----
+  result <- result %>%
+    mutate(
+      crop_stage = case_when(
+
+        # No crop / fallow
+        in_season == 0 | is.na(current_crop) ~ "fallow",
+
+        # ---- CORN (~110 days) ----
+        # https://corn.agronomy.wisc.edu/AA/pdfs/A102.pdf
+        current_crop == "corn" & days_since_planting < 0   ~ "freshly_planted",
+        current_crop == "corn" & days_since_planting <= 10  ~ "emergence",
+        current_crop == "corn" & days_since_planting <= 30  ~ "vegetative_early",
+        current_crop == "corn" & days_since_planting <= 50  ~ "vegetative_rapid",
+        current_crop == "corn" & days_since_planting <= 58  ~ "tasseling",
+        current_crop == "corn" & days_since_planting <= 60  ~ "silking",
+        current_crop == "corn" & days_since_planting <= 90  ~ "grain_fill",
+        current_crop == "corn" & days_since_planting <= 110 ~ "maturity",
+        current_crop == "corn"                              ~ "senescence",
+
+        # ---- SOYBEAN (~120-150 days) ----
+        # https://agricbusiness.com.ng/soybean-growth-stages-days/
+        current_crop == "soybean" & days_since_planting < 0   ~ "freshly_planted",
+        current_crop == "soybean" & days_since_planting <= 7   ~ "emergence",
+        current_crop == "soybean" & days_since_planting <= 45  ~ "vegetative",
+        current_crop == "soybean" & days_since_planting <= 55  ~ "flowering",
+        current_crop == "soybean" & days_since_planting <= 70  ~ "pod_development",
+        current_crop == "soybean" & days_since_planting <= 100 ~ "seed_fill",
+        current_crop == "soybean" & days_since_planting <= 120 ~ "maturity",
+        current_crop == "soybean"                              ~ "senescence",
+
+        # ---- BARLEY (~90-120 days) ----
+        # https://cals.cornell.edu/field-crops/small-grains/growth-stages
+        current_crop == "barley" & days_since_planting < 0   ~ "freshly_planted",
+        current_crop == "barley" & days_since_planting <= 14  ~ "emergence",
+        current_crop == "barley" & days_since_planting <= 35  ~ "tillering",
+        current_crop == "barley" & days_since_planting <= 60  ~ "stem_elongation",
+        current_crop == "barley" & days_since_planting <= 75  ~ "heading",
+        current_crop == "barley" & days_since_planting <= 95  ~ "grain_fill",
+        current_crop == "barley" & days_since_planting <= 115 ~ "maturity",
+        current_crop == "barley"                              ~ "senescence",
+
+        # Cover crop and alfalfa: placeholder — filled in Step 4b/4c below
+        current_crop == "cover crop"  ~ NA_character_,
+        current_crop == "alfalfa hay" ~ NA_character_,
+
+        TRUE ~ "unknown"
+      )
+    )
+
+  # ---- 4b: Cover crop stages (iterative helper, per field x planting season) ----
+  # Identify cover crop rows
+  cc_rows <- which(result$current_crop == "cover crop")
+
+  if (length(cc_rows) > 0) {
+
+    # Process each unique management x planting-date combination
+    cc_seasons <- result[cc_rows, ] %>%
+      select(management, current_plant_date) %>%
+      distinct()
+
+    for (k in seq_len(nrow(cc_seasons))) {
+      mgmt   <- cc_seasons$management[k]
+      pdate  <- cc_seasons$current_plant_date[k]
+      pmonth <- month(pdate)
+
+      # Row indices for this season
+      season_idx <- cc_rows[result$management[cc_rows] == mgmt &
+                              result$current_plant_date[cc_rows] == pdate]
+
+      # Termination = first tillage event at least 60 days after cover crop
+      # planting. The 60-day minimum excludes post-harvest seedbed preparation
+      # tillage that immediately precedes or follows cover crop establishment
+      # (e.g., barley harvested and field tilled 19 days after cover crop
+      # planting -- that tillage belongs to the previous crop, not termination).
+      # No cover crop is intentionally terminated within 60 days of planting.
+      # If a new planting occurs on the same day as tillage, Step 1 will have
+      # already flipped current_crop, so those rows won't be in cc_rows and
+      # "terminated" will never be written to them -- no extra handling needed.
+      term_events <- events %>%
+        filter(category == "tillage",
+               management == mgmt,
+               date >= pdate + days(60)) %>%
+        arrange(date)
+
+      term_date <- if (nrow(term_events) > 0) as.Date(term_events$date[1]) else as.Date(NA)
+
+      # Subset and add helper columns
+      sub <- result[season_idx, ] %>%
+        arrange(date) %>%
+        mutate(
+          planting_month   = pmonth,
+          termination_date = term_date
+        )
+
+      result$crop_stage[season_idx] <- assign_cover_crop_stages(sub)[order(order(result$date[season_idx]))]
+    }
+  }
+
+  # ---- 4c: Alfalfa stages (iterative helper, per field) ----
+  alf_rows <- which(result$current_crop == "alfalfa hay")
+
+  if (length(alf_rows) > 0) {
+    alf_fields <- unique(result$management[alf_rows])
+
+    for (fld in alf_fields) {
+      field_idx <- alf_rows[result$management[alf_rows] == fld]
+
+      sub <- result[field_idx, ] %>%
+        arrange(date)
+
+      result$crop_stage[field_idx] <- assign_alfalfa_stages(sub)[order(order(result$date[field_idx]))]
+    }
+  }
+
+  # =========================================================================
+  # STEP 4d: Simplified stage grouping for modeling
+  # =========================================================================
+
+  result <- result %>%
+    mutate(
+      crop_stage_simple = case_when(
+        # ---- Fallow / bare ----
+        crop_stage %in% c("fallow", "post_cut_recovery",
+                          "terminated") ~                          # cover crop: terminated = fallow
+          "fallow",
+
+        # ---- Early establishment (annuals) ----
+        crop_stage %in% c("freshly_planted", "emergence", "establishment",
+                          "germination", "seedling", "seedling_regrowth",
+                          "germination/emergence") ~
+          "early",
+
+        # ---- Vegetative ----
+        # Annual crops
+        crop_stage %in% c("vegetative", "vegetative_early", "vegetative_rapid",
+                          "tillering", "growth", "regrowth") ~
+          "vegetative",
+        # Cover crop active phases
+        crop_stage %in% c("fall tillering", "spring growth", "rapid growth") ~
+          "vegetative",
+        # Alfalfa: break dormancy, shoot elongation, and vegetative are all vegetative
+        # (shoot elongation in perennials precedes flowering, unlike annuals)
+        crop_stage %in% c("spring growth",
+                          "shoot_elongation",
+                          "rapid growth") ~
+          "vegetative",
+
+        # ---- Reproductive ----
+        # Annual crops
+        crop_stage %in% c("tasseling", "silking", "heading",
+                          "stem_elongation", "pre_flower") ~
+          "reproductive",
+        # Cover crop
+        crop_stage %in% c("flowering") ~
+          "reproductive",
+        # Alfalfa: bud and flowering
+        crop_stage %in% c("bud", "flowering") ~
+          "reproductive",
+
+        # ---- Grain / seed fill ----
+        crop_stage %in% c("grain_fill", "seed_fill", "pod_development",
+                          "bloom",
+                          "seed production") ~                     # cover crop
+          "grain_fill",
+
+        # ---- Mature / senescence ----
+        crop_stage %in% c("maturity", "mature_growth", "mature",
+                          "senescence",
+                          "maturity") ~                            # alfalfa maturity
+          "mature",
+
+        # ---- Dormant ----
+        # Cover crop and alfalfa
+        crop_stage %in% c("dormant", "fall hardening") ~
+          "dormant",
+
+        TRUE ~ "unknown"
+      )
+    )
+
+  # =========================================================================
+  # STEP 5: MANAGEMENT EFFECT VARIABLES (crop-specific) — currently commented
+  # =========================================================================
+
+  # result <- result %>%
+  #   mutate(
+  #     tillage_pulse = case_when(
+  #       is.na(days_since_tillage) ~ 0,
+  #       days_since_tillage > 60 ~ 0,
+  #       TRUE ~ exp(-days_since_tillage / 20)
+  #     ),
+  #     fert_effect = case_when(
+  #       is.na(days_since_fertilizer) ~ 0,
+  #       days_since_fertilizer > 60 ~ 0,
+  #       days_since_fertilizer <= 45 ~ exp(-days_since_fertilizer / 15),
+  #       TRUE ~ 0
+  #     ),
+  #     herbicide_recent = case_when(
+  #       is.na(days_since_herbicide) ~ 0,
+  #       days_since_herbicide <= 14 ~ 1,
+  #       TRUE ~ 0
+  #     ),
+  #     post_harvest = case_when(
+  #       current_crop == "alfalfa hay" & !is.na(last_harvest) ~
+  #         if_else(as.numeric(date - last_harvest) <= 14, 1, 0),
+  #       in_season == 0 & !is.na(current_harvest_date) ~
+  #         if_else(as.numeric(date - current_harvest_date) <= 30, 1, 0),
+  #       TRUE ~ 0
+  #     ),
+  #     crop_functional_type = case_when(
+  #       is.na(current_crop) ~ "none",
+  #       current_crop == "corn" ~ "C4_annual",
+  #       current_crop %in% c("soybean", "barley") ~ "C3_annual",
+  #       current_crop == "alfalfa hay" ~ "C3_perennial",
+  #       current_crop == "cover crop" ~ "C3_annual",
+  #       TRUE ~ "unknown"
+  #     )
+  #   )
+
+  return(result)
+}
+
+# =============================================================================
+# HELPER: Attach EC-derived crop stage classifications to chamber survey data
+#
+# Rather than re-running stage logic on sparse survey dates (which would make
+# rolling temperature smoothing meaningless), this function simply left-joins
+# the already-classified EC result onto the chamber data by management x date.
+# Since the EC data is daily and complete, every chamber survey date should
+# match exactly.
+#
+# Arguments:
+#   chamber  : chamber survey data frame (must have 'management' and 'date')
+#   ec_result: output of create_management_vars_multicrop() on the EC data
+#   extra_cols: additional columns from ec_result to carry over beyond the
+#               defaults (current_crop, crop_stage, crop_stage_simple).
+#               Pass as a character vector, e.g. c("days_since_planting").
+#
+# Returns the chamber data frame with crop stage columns appended.
+# =============================================================================
+
+attach_crop_stages_to_chambers <- function(chamber, ec_result,
+                                           extra_cols = NULL) {
+
+  cols_to_join <- c("management", "date",
+                    "current_crop", "crop_stage", "crop_stage_simple",
+                    extra_cols)
+
+  # Guard against requesting columns that don't exist in ec_result
+  missing <- setdiff(cols_to_join, names(ec_result))
+  if (length(missing) > 0) {
+    stop("Columns not found in ec_result: ", paste(missing, collapse = ", "))
+  }
+
+  chamber %>%
+    mutate(date = as.Date(date)) %>%
+    left_join(
+      ec_result %>% select(all_of(cols_to_join)),
+      by = c("management", "date")
+    )
+}

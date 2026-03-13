@@ -1,0 +1,180 @@
+# =============================================================================
+# GAM models: Management effects on NEE (EC tower data)
+#
+# Two model structures compared:
+#   Model 1 (additive):  separate smooths for air_temperature and VPD
+#   Model 2 (tensor):    ti(air_temperature, VPD) interaction term added
+#
+# Dropped from previous version:
+#   - soilt_avg (ERA5-modeled, not empirical)
+#   - vwc_avg   (ERA5-modeled, not empirical)
+#   - ti(soilt_avg, vwc_avg, ...) tensor interaction
+#
+# Retained:
+#   - management * crop_stage_simple (fixed interaction)
+#   - s(year, bs = "re", by = management) (random effect of year per management)
+#   - s(doy, bs = "cc", k = 20) (shared seasonal cycle, cyclical cubic spline)
+#   - s(air_temperature, by = management, k = 10)
+#   - s(VPD, by = management, k = 10)
+#   - s(days_since_tillage, by = management, k = 8)
+#
+# Note on concurvity: air_temperature and VPD covary strongly (VPD is a
+# function of temp and RH). Check post-fit with concrvity(model, full = TRUE).
+# Values > 0.8 for any term indicate a potential problem. RH is excluded
+# entirely for this reason -- VPD already integrates humidity information.
+#
+# Model comparison: use AIC and REML score. Note that REML scores are only
+# directly comparable between models with identical fixed effect structures;
+# use AIC (ML-fitted) for comparing models 1 vs 2.
+# =============================================================================
+
+library(mgcv)
+library(dplyr)
+
+# make sure management is in factor form
+ec_daily_mngmnt$management <- factor(as.character(ec_daily_mngmnt$management))
+# same for crop stage:
+ec_daily_mngmnt$crop_stage_simple <- factor(
+  ec_daily_mngmnt$crop_stage_simple,
+  levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "dormant", "fallow")
+)
+
+# -----------------------------------------------------------------------------
+# Model 1: Additive -- separate smooths for air_temperature and VPD
+# -----------------------------------------------------------------------------
+
+gam_NEE_additive <- gam(
+  NEE ~
+    # management +
+    management *
+    crop_stage_simple +
+    
+    # s(year, bs = "re")+
+    s(year, bs = "re", by = as.factor(management)) +   # year random effect
+                                                        # per management
+    s(doy, bs = "cc", k = 20) +                        # shared seasonal cycle
+
+    # s(air_temperature,    k = 10)+
+    # s(VPD,                k = 10)+
+    # s(days_since_tillage, k = 8),
+    s(air_temperature, by = as.factor(management), k = 10) +
+    s(VPD,             by = as.factor(management), k = 10) +
+    s(days_since_tillage, by = as.factor(management), k = 8),
+
+  data   = ec_daily_mngmnt,
+  method = "REML"
+)
+
+# -----------------------------------------------------------------------------
+# Model 2: Tensor interaction -- ti(air_temperature, VPD) added
+#
+# Rationale: hot+dry days (high temp, high VPD) may suppress NEE differently
+# than cool+dry or hot+humid conditions. The ti() terms decompose the
+# interaction cleanly, leaving the main effects (s() terms) interpretable.
+# -----------------------------------------------------------------------------
+
+gam_NEE_tensor <- gam(
+  NEE ~
+    management *
+    crop_stage_simple +
+
+    s(year, bs = "re", by = as.factor(management)) +
+    s(doy, bs = "cc", k = 20) +
+
+    s(air_temperature, by = as.factor(management), k = 10) +
+    s(VPD,             by = as.factor(management), k = 10) +
+
+    ti(air_temperature, VPD,
+       by = as.factor(management),
+       k  = c(8, 8)) +
+
+    s(days_since_tillage, by = as.factor(management), k = 8),
+
+  data   = ec_daily_mngmnt,
+  method = "REML"
+)
+
+# -----------------------------------------------------------------------------
+# Model 3: FULL tensor product -- te(air_temperature, VPD) added, and removal
+# of the independent air temp and VPD terms; thus the marginal smooths are 
+# encompassed by the tensor product smooth.
+#
+# Rationale: hot+dry days (high temp, high VPD) may suppress NEE differently
+# than cool+dry or hot+humid conditions. The te) term does NOT decompose the
+# interaction, so the main effects of temp and VPD are not interpretable, but 
+# this structure reduces the risk of concurvity (aka when a smooth term can be
+# approximated by a combo of others).
+# -----------------------------------------------------------------------------
+
+gam_NEE_tensor2 <- gam(
+  NEE ~
+    management *
+    crop_stage_simple +
+    s(year, bs = "re", by = as.factor(management)) +
+    s(doy, bs = "cc", k = 20) +
+    te(air_temperature, VPD,
+       by = as.factor(management),
+       k  = c(8, 8)) +
+    s(days_since_tillage, by = as.factor(management), k = 8),
+  data   = ec_daily_mngmnt,
+  method = "REML"
+)
+
+# -----------------------------------------------------------------------------
+# Model 4: simplified version of model 1, dropping air temperature as it co-
+# varies with VPD (which is calcualted with air temperature and humidity).
+# -----------------------------------------------------------------------------
+
+gam_NEE_simple <- gam(
+  NEE ~
+    management *
+    crop_stage_simple +
+    
+    s(year, bs = "re", by = as.factor(management)) +   # year random effect
+    # per management
+    s(doy, bs = "cc", k = 20) +                        # shared seasonal cycle
+    
+    # s(air_temperature, by = as.factor(management), k = 10) +
+    s(VPD,             by = as.factor(management), k = 10) +
+    s(days_since_tillage, by = as.factor(management), k = 8),
+  
+  data   = ec_daily_mngmnt,
+  method = "REML"
+)
+
+# -----------------------------------------------------------------------------
+# Model comparison
+# -----------------------------------------------------------------------------
+
+# Refit with ML for valid AIC comparison (REML scores not comparable across
+# models with different smooth/fixed structures). We will use the REML-fitted 
+# models for interpretation, but direct comparison of goodness-of-fit will
+# not be meaningful, hence re-fitting here.
+gam_NEE_additive_ml <- update(gam_NEE_additive, method = "ML")
+gam_NEE_tensor_ml   <- update(gam_NEE_tensor,   method = "ML")
+gam_NEE_tensor2_ml <- update(gam_NEE_tensor2, method = "ML")
+gam_NEE_simple_ml <- update(gam_NEE_simple, method = "ML")
+
+AIC(gam_NEE_additive_ml, gam_NEE_tensor_ml, gam_NEE_tensor2_ml, gam_NEE_simple_ml)
+# df      AIC
+# gam_NEE_additive_ml 52.64568 7143.326
+# gam_NEE_tensor_ml   61.96592 7087.594
+# gam_NEE_tensor2_ml  65.91317 7080.523 Looks like te() interaction is the way to go
+# gam_NEE_simple_ml   44.39290 7250.166
+
+# Summary and diagnostics
+summary(gam_NEE_additive)
+summary(gam_NEE_tensor)
+summary(gam_NEE_tensor2)
+
+# Concurvity check -- values > 0.8 indicate problematic collinearity
+# between smooth terms. Pay attention to air_temperature and VPD rows.
+concurvity(gam_NEE_additive, full = TRUE)
+concurvity(gam_NEE_tensor,   full = TRUE)
+
+# Residual diagnostics
+par(mfrow = c(2, 2))
+gam.check(gam_NEE_additive)
+
+par(mfrow = c(2, 2))
+gam.check(gam_NEE_tensor)

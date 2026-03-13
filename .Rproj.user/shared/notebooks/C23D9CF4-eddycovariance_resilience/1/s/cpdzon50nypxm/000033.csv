@@ -1,0 +1,12 @@
+"0","# bind the USDM drought risk data to the average hourly management data using time stamps
+ec_daily_mngmnt2 <- ec_daily_mngmnt2 %>% 
+  left_join(usdm_final) %>% 
+  # rename drought columns for clarity:
+  rename(calculated_drought = drought_stress,
+         usdm_drought = drought_risk)
+"
+"1","[1m[33mError[39m in `rename()`:[22m
+[33m![39m Can't rename columns that don't exist.
+[31m✖[39m Column `drought_stress` doesn't exist.
+[90mRun `]8;;x-r-run:rlang::last_trace()rlang::last_trace()]8;;` to see where the error occurred.[39m
+"

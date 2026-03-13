@@ -1,0 +1,1 @@
+{"frames":[{"func":"dairy_ec %>% mutate(management = \"dairy pasture\")","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0},{"func":"mutate(., management = \"dairy pasture\")","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error: object 'dairy_ec' not found\n"}

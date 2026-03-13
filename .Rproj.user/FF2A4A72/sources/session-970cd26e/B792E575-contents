@@ -1,0 +1,141 @@
+library(tidyverse)
+library(readxl)
+library(purrr)
+library(lubridate)
+library(hms)
+library(here)
+
+# ============================================================================
+# 1. upload eddy covariance data from project folder:
+# ============================================================================
+
+# eddy covariance final data:
+ec_conv <-  read_csv(here("eddy_covariance_fluxdata", "conv_final.csv"))
+ec_conv <- ec_conv %>%
+  mutate("management" = "conventional")
+
+ec_org <- read_csv(here("eddy_covariance_fluxdata", "organic_final.csv"))
+ec_org <- ec_org %>%
+  mutate("management" = "organic")
+
+all_ec <- rbind(ec_conv, ec_org) # 215,064 rows of 155 variables
+
+# select just those variables you'll use in analyses:
+all_ec_filtered <- all_ec %>%
+  select(date, month, hour, management,
+         # non-gap-filled NEE data:
+         co2_flux.c,
+         # gap-filled NEE data:
+         rfnee,
+         # gap-filled R-eco, GPP data:
+         Reco, GPP_f, 
+         # empirical edaphic variables:
+         air_temperature, air_pressure, RH, VPD, 
+         # era5 modeled edaphic variables:
+         ndvi, rh, vwc1, vwc2, precip, airt, soilt1, soilt2) %>%
+  #add year
+  mutate(year = year(date)) %>% 
+  # rename a few variables
+  rename(NEE = co2_flux.c,
+         NEE_gapfilled = rfnee,
+         Reco_gapfilled = Reco,
+         GPP_gapfilled = GPP_f) %>% 
+  # convert air_temperature to celcius from Kelvin
+  mutate(air_temperature = air_temperature - 273.15) %>% 
+  # rename the era5 modeled vars so they're clear:
+  rename(airt_era5 = airt,
+         RH_era5 = rh,
+         vwc1_era5 = vwc1,
+         vwc2_era5 = vwc2,
+         precip_era5 = precip,
+         ndvi_era5 = ndvi,
+         soilt1_era5 = soilt1,
+         soilt2_era5 = soilt2)
+
+# create non-gap-filled columns for Reco, GPP
+all_ec_filtered <- all_ec_filtered %>% 
+  mutate(Reco = if_else(is.na(NEE), NA_integer_, Reco_gapfilled)) %>% 
+  mutate(GPP = if_else(is.na(NEE), NA_integer_, GPP_gapfilled))
+
+# ============================================================================
+# 2. create hourly...
+# ============================================================================
+
+ec_hrly_avg <- all_ec_filtered %>% 
+  rowwise() %>%
+  mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
+         vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
+  select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
+  group_by(management, date, hour) %>% 
+  summarize(across(is.numeric, mean, na.rm = TRUE), .groups = 'drop') %>% 
+  ungroup()
+
+# ============================================================================
+# 3. daily...
+# ============================================================================
+
+ec_daily_avg <- all_ec_filtered %>% 
+  rowwise() %>%
+  mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
+         vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
+  select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
+  group_by(management, date) %>% 
+  summarize(
+    Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
+    NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
+    # gap-filled versions:
+    Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
+    NEE_gf_se = sd(NEE_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(NEE_gapfilled))),
+    across(is.numeric, mean, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>% 
+  ungroup() %>% 
+  select(!c(hour)) %>% 
+  mutate(doy = yday(date)) %>% 
+  mutate_all(~ifelse(is.nan(.), NA, .))
+ 
+# ============================================================================
+# 4. and weekly averages of the EC data for further analyses:
+# ============================================================================
+
+ec_weekly_avg <- all_ec_filtered %>% 
+  rowwise() %>% 
+  mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
+         vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
+  select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
+  group_by(management, week = floor_date(date, "week")) %>%
+  summarize(
+    Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
+    NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
+    # gap-filled versions:
+    Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
+    NEE_gf_se = sd(NEE_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(NEE_gapfilled))),
+    across(is.numeric, mean, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>% 
+  ungroup() %>% 
+  select(!c(hour)) %>% 
+  mutate_all(~ifelse(is.nan(.), NA, .))
+
+# ============================================================================
+# 5. remove unnecessary items from global environment:
+# ============================================================================
+
+rm(ec_org, ec_conv, all_ec)
+
+# ============================================================================
+# 6. more trimming: remove rows before 4/30/2018 for conventional field 
+# (first management datapoint) to avoid artificially high fallow
+# also doing things like making the Date column the right format (as.Date)
+# ============================================================================
+
+ec_daily_avg <- ec_daily_avg %>% 
+  filter(!(management == "conventional" & date < "2018-04-30")) %>% 
+  mutate(date = as.Date(date))
+
+ec_hrly_avg <- ec_hrly_avg %>% 
+  filter(!(management == "conventional" & date < "2018-04-30")) %>% 
+  mutate(date = as.Date(date))
+
+# ec_weekly_avg <- ec_weekly_avg %>% 
+#   filter(!(management == "conventional" & date < "2018-04-30"))

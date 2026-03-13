@@ -1,0 +1,5 @@
+"0","dairy_ec <- dairy_ec %>%
+  mutate(""management"" = ""dairy pasture"")
+"
+"2","Error: object 'dairy_ec' not found
+"
