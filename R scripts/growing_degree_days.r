@@ -1,0 +1,138 @@
+# Load necessary packages
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+
+# Sample data: replace this with your actual data loading method
+data_text <- "
+date,crop_type,air_temp_7d_smooth,air_temp_10d_smooth,ndvi_7d_smooth,soil_temp_7d_smooth,ndvi_slope
+7/9/20,cover crop,22.55864652,21.65115441,0.539769016,21.21599592,0.009099978
+7/10/20,cover crop,22.76004903,22.1380023,0.54854211,21.45507936,0.008750448
+7/11/20,cover crop,22.8967173,22.59259801,0.556865651,21.66207229,0.008199135
+7/12/20,cover crop,22.86827687,22.62718013,0.56455533,21.75674786,0.007459579
+7/13/20,cover crop,22.74847812,22.72211944,0.571460071,21.7630206,0.006565615
+7/14/20,cover crop,22.70002602,22.60430659,0.577463539,21.75498284,0.005564196
+7/15/20,cover crop,22.44395558,22.3986117,0.582484138,21.64776712,0.00450671
+7/16/20,cover crop,21.78835331,22.10767571,0.586475015,21.30901767,0.003440291
+7/17/20,cover crop,21.30585412,21.94210108,0.589424054,20.86535108,0.002399136
+7/18/20,cover crop,21.4629295,22.07130582,0.591352494,20.76381095,0.001397208
+7/19/20,cover crop,21.98202517,22.22354519,0.592299186,20.9591052,0.000436
+7/20/20,cover crop,22.55555682,22.5789749,0.592304487,21.40018801,-0.000486
+7/21/20,cover crop,23.02852795,22.69657404,0.591408755,21.79844295,-0.001366
+7/22/20,cover crop,23.44931587,22.805339,0.589652349,22.16264853,-0.002207
+7/23/20,cover crop,23.84442373,22.87483764,0.587075626,22.49165634,-0.003007
+7/24/20,cover crop,24.38360569,23.12060685,0.583718947,22.92945543,-0.003767
+7/25/20,cover crop,24.44330529,23.47085061,0.579622667,23.14795327,-0.004486
+7/26/20,cover crop,24.27688261,23.96551569,0.574827146,23.18357928,-0.005165
+7/27/20,cover crop,24.42152358,24.75994352,0.569373399,23.22049052,-0.005804
+7/28/20,cover crop,24.48746044,24.81374569,0.56331054,23.31735652,-0.006394
+7/29/20,cover crop,24.55886167,24.60912455,0.556703398,23.34153373,-0.006922
+7/30/20,cover crop,24.63182709,24.32822682,0.549633231,23.39740223,-0.007364
+7/31/20,cover crop,24.64111481,24.24941765,0.542197726,23.48868147,-0.007697
+8/1/20,cover crop,24.59952527,24.27599719,0.534510998,23.56260418,-0.007897
+8/2/20,cover crop,24.33113369,24.30621266,0.526703588,23.4715326,-0.007950
+8/3/20,cover crop,23.92388217,24.43813705,0.518921812,23.25748345,-0.007847
+8/4/20,cover crop,23.32032256,24.02765778,0.511320313,22.83017151,-0.007589
+8/5/20,cover crop,22.89192357,23.63965322,0.504054448,22.51970496,-0.007176
+8/6/20,cover crop,22.37105147,22.89289635,0.497279572,22.12579913,-0.006607
+8/7/20,cover crop,21.88545457,22.42801355,0.491151043,21.7190977,-0.005883
+8/8/20,cover crop,21.51534519,22.14553566,0.485824216,21.36730281,-0.005004
+8/9/20,cover crop,21.5189972,22.12723174,0.481454449,21.24909248,-0.003969
+8/10/20,cover crop,21.53325817,22.26263741,0.478197097,21.20928912,-0.002779
+8/11/20,cover crop,22.27580114,22.40105089,0.476207518,21.57385386,-0.001433
+8/12/20,cover crop,22.68451496,22.48702011,0.475638424,21.94777835,0.000066
+8/13/20,cover crop,23.18961886,22.37891204,0.476609911,22.32498787,0.001692
+8/14/20,cover crop,23.64256921,22.6535862,0.479178791,22.70063485,0.003381
+8/15/20,cover crop,23.61189931,22.64951868,0.483335722,22.87075036,0.005045
+8/16/20,cover crop,22.96997666,22.54647937,0.489005206,22.64774016,0.006584
+8/17/20,cover crop,22.26497464,22.52830146,0.496045588,22.2134527,0.007909
+8/18/20,cover crop,21.46425606,22.3652885,0.504249059,21.67673258,0.008956
+8/19/20,cover crop,20.64720751,21.87676733,0.513344299,21.0542207,0.009696
+8/20/20,cover crop,19.90965984,21.24239321,0.523026447,20.48682638,0.010129
+8/21/20,cover crop,19.72905016,20.87086051,0.532987773,20.11705976,0.010255
+8/22/20,cover crop,19.98500261,20.75986004,0.542920546,20.06886151,0.010072
+8/23/20,cover crop,20.65514386,20.77234686,0.552517034,20.35079089,0.009582
+8/24/20,cover crop,21.3689409,20.93676165,0.561469506,20.79862151,0.008784
+8/25/20,cover crop,21.77557253,21.07985975,0.569470231,21.18273059,0.007679
+8/26/20,cover crop,21.61166073,20.92594619,0.576211478,21.28279102,0.006265
+8/27/20,cover crop,21.34438418,20.59797988,0.581385514,21.15512951,0.004544
+8/28/20,cover crop,21.12633946,20.63431889,0.584688173,21.08306437,0.002518
+8/29/20,cover crop,20.66856441,20.77480987,0.585859277,20.79984454,0.000222
+8/30/20,cover crop,19.70304896,20.62771924,0.584723988,20.27219874,-0.002258
+8/31/20,cover crop,18.59302333,20.14154286,0.581196684,19.46905543,-0.004801
+9/1/20,cover crop,17.96209867,19.66382699,0.575280962,18.80559652,-0.007274
+9/2/20,cover crop,18.10273391,19.13925923,0.567069632,18.55732339,-0.009557
+9/3/20,cover crop,18.73300192,18.75282259,0.55674472,18.8319431,-0.011563
+9/4/20,cover crop,18.58172431,18.39862514,0.544573905,18.83475415,-0.013254
+9/5/20,cover crop,18.1991641,18.38606222,0.530870091,18.63136174,-0.014629
+9/6/20,cover crop,18.40507013,18.57019941,0.51595006,18.59112837,-0.015687
+9/7/20,cover crop,18.83683841,18.53889213,0.500130591,18.8244547,-0.016428
+9/8/20,cover crop,19.3402764,18.73402538,0.483728462,19.18231869,-0.016852
+9/9/20,cover crop,19.93004568,19.29815693,0.467060455,19.6390619,-0.016959
+9/10/20,cover crop,19.97978111,19.72355304,0.450443347,19.7995827,-0.016750
+9/11/20,cover crop,19.65900844,19.58646197,0.43419392,19.72936905,-0.016224
+9/12/20,cover crop,19.28532356,19.21387498,0.418628952,19.52907634,-0.015381
+9/13/20,cover crop,19.10207352,18.82854953,0.404062547,19.37438032,-0.014224
+9/14/20,cover crop,18.54646919,18.51421355,0.39077577,19.11353528,-0.012777
+9/15/20,cover crop,17.27569206,18.08759495,0.37898559,18.36691299,-0.011108
+9/16/20,alfalfa hay,16.28203574,17.81203286,0.368841972,17.56616818,-0.009305
+9/17/20,alfalfa hay,15.68153439,17.51484022,0.360427873,16.99926214,-0.007469
+9/18/20,alfalfa hay,15.11525924,16.62894996,0.353759248,16.51531411,-0.005690
+"
+
+# Read data
+df <- read.csv(text = data_text, stringsAsFactors = FALSE)
+
+# Convert date column to Date type
+df$date <- mdy(df$date)
+
+# Define barley harvest date
+harvest_date <- as.Date("2020-07-09")
+
+# Calculate days since barley harvest
+df$days_since_harvest <- as.numeric(difftime(df$date, harvest_date, units = "days"))
+
+# Set base temperature for GDD calculation (5°C typical for alfalfa; 10C typical for orchardgrass)
+T_base_a <- 5
+T_base_o <- 1
+
+# Calculate daily GDD (using air_temp_7d_smooth as mean temp proxy, one for each base temp)
+df$daily_gdd_a <- pmax(0, df$air_temp_7d_smooth - T_base_a)
+df$daily_gdd_o <- pmax(0, df$air_temp_7d_smooth - T_base_o)
+
+# Calculate cumulative GDD starting from barley harvest date
+df <- df %>%
+  arrange(date) %>%
+  mutate(cumulative_gdd_a = ifelse(days_since_harvest >= 0, cumsum(daily_gdd_a * (days_since_harvest >= 0)), 0),
+         cumulative_gdd_o = ifelse(days_since_harvest >= 0, cumsum(daily_gdd_o * (days_since_harvest >= 0)), 0)
+         )
+
+# Classify growth phase
+df$growth_phase <- with(df, ifelse(days_since_harvest < 0, "Pre-Harvest",
+                                   ifelse(days_since_harvest < 14 & cumulative_gdd < 100, "Establishment",
+                                          ifelse(days_since_harvest >= 14 & cumulative_gdd >= 100 & soil_temp_7d_smooth >= 15, "Vegetative Growth",
+                                                 "Transition / Uncertain"))))
+
+# View results
+print(df[, c("date", "days_since_harvest", "daily_gdd", "cumulative_gdd_a", 
+             "cumulative_gdd_o", "soil_temp_7d_smooth", "growth_phase")])
+
+# Plot cumulative GDD with growth phases shaded
+ggplot(df, aes(x = date)) +
+  geom_line(aes(y = cumulative_gdd), color = "blue", size = 1) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "gray") +
+  geom_rect(data = subset(df, growth_phase == "Pre-Harvest"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "lightgray", alpha = 0.3) +
+  geom_rect(data = subset(df, growth_phase == "Establishment"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "orange", alpha = 0.3) +
+  geom_rect(data = subset(df, growth_phase == "Vegetative Growth"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "lightgreen", alpha = 0.3) +
+  labs(title = "Cumulative GDD and Cover Crop Growth Phases",
+       y = "Cumulative GDD (°C-days)",
+       x = "Date") +
+  theme_minimal() +
+  scale_x_date(date_breaks = "1 week", date_labels = "%b %d") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))

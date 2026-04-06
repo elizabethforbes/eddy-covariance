@@ -60,15 +60,16 @@ all_ec_filtered <- all_ec_filtered %>%
 # ============================================================================
 # 2. create hourly...
 # ============================================================================
-
-ec_hrly_avg <- all_ec_filtered %>% 
-  rowwise() %>%
-  mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
-         vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
-  select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
-  group_by(management, date, hour) %>% 
-  summarize(across(is.numeric, mean, na.rm = TRUE), .groups = 'drop') %>% 
-  ungroup()
+# 
+# ec_hrly_avg <- all_ec_filtered %>% 
+#   rowwise() %>%
+#   mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
+#          vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
+#   select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
+#   group_by(management, date, hour) %>% 
+#   # summarize(across(is.numeric, mean, na.rm = TRUE), .groups = 'drop') %>% 
+#   summarize(across(where(is.numeric), mean, na.rm = TRUE), .groups = 'drop') %>% 
+#   ungroup()
 
 # ============================================================================
 # 3. daily...
@@ -83,7 +84,6 @@ ec_daily_avg <- all_ec_filtered %>%
   summarize(
     Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
     NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
-    # gap-filled versions:
     Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
     NEE_gf_se = sd(NEE_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(NEE_gapfilled))),
     across(is.numeric, mean, na.rm = TRUE),
@@ -92,30 +92,31 @@ ec_daily_avg <- all_ec_filtered %>%
   ungroup() %>% 
   select(!c(hour)) %>% 
   mutate(doy = yday(date)) %>% 
-  mutate_all(~ifelse(is.nan(.), NA, .))
+  mutate(across(where(is.numeric), ~ifelse(is.nan(.), NA_real_, .))) %>%
+  mutate(date = as.Date(date, origin = "1970-01-01"))  # restore Date class after across()
  
 # ============================================================================
 # 4. and weekly averages of the EC data for further analyses:
 # ============================================================================
 
-ec_weekly_avg <- all_ec_filtered %>% 
-  rowwise() %>% 
-  mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
-         vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
-  select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
-  group_by(management, week = floor_date(date, "week")) %>%
-  summarize(
-    Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
-    NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
-    # gap-filled versions:
-    Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
-    NEE_gf_se = sd(NEE_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(NEE_gapfilled))),
-    across(is.numeric, mean, na.rm = TRUE),
-    .groups = 'drop'
-  ) %>% 
-  ungroup() %>% 
-  select(!c(hour)) %>% 
-  mutate_all(~ifelse(is.nan(.), NA, .))
+# ec_weekly_avg <- all_ec_filtered %>% 
+#   rowwise() %>% 
+#   mutate(soilt_avg_era5 = rowMeans(cbind(soilt1_era5, soilt2_era5), na.rm = TRUE),
+#          vwc_avg_era5 = rowMeans(cbind(vwc1_era5, vwc2_era5), na.rm = TRUE)) %>% 
+#   select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
+#   group_by(management, week = floor_date(date, "week")) %>%
+#   summarize(
+#     Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
+#     NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
+#     # gap-filled versions:
+#     Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
+#     NEE_gf_se = sd(NEE_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(NEE_gapfilled))),
+#     across(is.numeric, mean, na.rm = TRUE),
+#     .groups = 'drop'
+#   ) %>% 
+#   ungroup() %>% 
+#   select(!c(hour)) %>% 
+#   mutate_all(~ifelse(is.nan(.), NA, .))
 
 # ============================================================================
 # 5. remove unnecessary items from global environment:
@@ -138,11 +139,11 @@ ec_daily_avg <- ec_daily_avg %>%
   filter(!(management == "organic" & date > "2021-08-10")) %>% 
   mutate(date = as.Date(date))
 
-ec_hrly_avg <- ec_hrly_avg %>% 
-  filter(!(management == "conventional" & date < "2018-04-30")) %>% 
-  filter(!(management == "conventional" & date > "2021-10-01")) %>% 
-  filter(!(management == "organic" & date > "2021-08-10")) %>% 
-  mutate(date = as.Date(date))
+# ec_hrly_avg <- ec_hrly_avg %>% 
+#   filter(!(management == "conventional" & date < "2018-04-30")) %>% 
+#   filter(!(management == "conventional" & date > "2021-10-01")) %>% 
+#   filter(!(management == "organic" & date > "2021-08-10")) %>% 
+#   mutate(date = as.Date(date))
 
 # ec_weekly_avg <- ec_weekly_avg %>% 
 #   filter(!(management == "conventional" & date < "2018-04-30"))

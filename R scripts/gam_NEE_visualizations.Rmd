@@ -1,0 +1,363 @@
+# GAM Visualization Scripts - Quick Start Guide
+
+## Installation
+
+```{r}
+# Required packages
+# install.packages(c("ggplot2", "dplyr", "tidyr", "viridis", 
+#                    "patchwork", "scales", "mgcv", "gratia"))
+
+library(here)
+# Load the scripts
+source(here("R scripts", "gam_NEE_vizfunctions.R"))
+```
+
+## Basic Usage
+
+### 1. Load Your Data
+
+```{r}
+library(readr)
+library(lubridate)
+
+# Load your EC daily management data
+data <- read_csv(here("eddy_covariance_fluxdata", "ecdailymngmnt_16Mar2026.csv"))
+data$date <- as.Date(data$date, format="%m/%d/%y")
+```
+
+### 2. Fit a GAM Model
+```{r}
+library(mgcv)
+
+# make sure management is in factor form
+data$management <- factor(as.character(data$management))
+# same for crop stage:
+data$crop_stage_simple <- factor(
+  data$crop_stage_simple,
+  levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "dormant", "fallow", "regrowth", "recovery")
+)
+
+# Example: NEE model with crop stage interaction
+model_nee <- gam(
+  NEE ~ 
+    crop_stage_simple +
+    s(air_temperature, by = crop_stage_simple, k = 5) +
+    s(VPD, k = 5) +
+    # s(soil_temp_smooth, k = 5) +
+    management,
+  data = data,
+  method = "REML"
+)
+
+summary(model_nee)
+```
+
+### 3. Create Visualizations
+
+#### Quick Single Plot
+```{r}
+# Observed vs predicted
+plot_gam_observed_vs_predicted(model_nee, data, "NEE")
+```
+
+
+```{r}
+# Residuals by stage
+plot_gam_residuals_by_stage(model_nee, data, "NEE")
+```
+
+
+```{r}
+# Flux distribution by stage
+plot_flux_by_stage(data, "NEE", add_stats = TRUE)
+```
+
+#### Save All Standard Plots
+```{r}
+# Generate and save all plots automatically
+# generate_all_plots(data, model_nee, output_dir = "./results/plots")
+
+```
+
+## Individual Plot Examples
+
+### A. Model Performance
+```{r}
+# Observed vs predicted with hexbin
+p <- plot_gam_observed_vs_predicted(
+  model = model_nee,
+  data = data,
+  flux_var = "NEE",
+  title = "GAM Performance: Net Ecosystem Exchange"
+)
+print(p)
+# ggsave("obs_vs_pred.png", p, width = 8, height = 6, dpi = 300)
+```
+
+### B. Stage Comparisons
+```{r}
+# Compare flux across all stages
+p <- plot_flux_by_stage(
+  data = data,
+  flux_var = "NEE",
+  add_stats = TRUE,
+  facet_by = NULL  # Or "management" to split by field
+)
+print(p)
+```
+
+### C. Management Comparison
+```{r}
+# Conventional vs Organic
+p <- plot_management_comparison(
+  data = data,
+  flux_var = "NEE"
+)
+print(p)
+```
+
+### D. Time Series
+```{r}
+# Full time series with stage coloring
+p <- plot_timeseries_with_stages(
+  data = data,
+  flux_var = "NEE",
+  management = "organic",  # Optional: filter to one field
+  year = 2021              # Optional: filter to one year
+)
+print(p)
+```
+
+### E. Partial Effects
+```{r}
+# Temperature effect across stages
+p <- plot_partial_effects_by_stage(
+  model = model_nee,
+  data = data,
+  var = "air_temperature",
+  flux_var = "nee",
+  stages = c("vegetative", "reproductive", "grain_fill", "mature")
+)
+print(p)
+```
+
+### F. Heatmap
+```{r}
+# Seasonal patterns
+p <- plot_flux_heatmap(
+  data = data,
+  flux_var = "NEE",
+  time_unit = "month",
+  management = "conventional"
+)
+print(p)
+```
+
+### G. Multi-Panel Summary
+```{r}
+# All three flux components (NEE, GPP, Reco)
+p <- plot_flux_summary(
+  data = data,
+  stages = NULL,  # All stages
+  management = NULL  # Both fields
+)
+print(p)
+# ggsave("flux_summary.png", p, width = 10, height = 12, dpi = 300)
+```
+
+## Advanced Examples
+
+### Compare Multiple Flux Variables
+```{r}
+library(patchwork)
+
+# Create plots for each flux
+p_nee <- plot_flux_by_stage(data, "NEE")
+p_gpp <- plot_flux_by_stage(data, "GPP")
+p_reco <- plot_flux_by_stage(data, "Reco")
+
+# Combine
+combined <- p_nee + p_gpp + p_reco +
+  plot_layout(ncol = 3) +
+  plot_annotation(title = "Carbon Flux Components by Crop Stage")
+combined
+
+# ggsave("flux_comparison.png", combined, width = 18, height = 6, dpi = 300)
+```
+
+### Facet by Year and Management
+```{r}
+# Add year column
+data$year <- year(data$date)
+
+# Plot with faceting
+p <- ggplot(data, aes(x = crop_stage_simple, y = NEE, 
+                      fill = crop_stage_simple)) +
+  geom_boxplot(alpha = 0.8) +
+  facet_grid(management ~ year) +
+  scale_fill_manual(values = stage_colors, guide = "none") +
+  theme_flux() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "NEE by Stage, Management, and Year",
+       x = "Crop Stage",
+       y = expression(NEE~(µmol~CO[2]~m^-2~s^-1)))
+
+print(p)
+```
+
+### Smooth Term Visualization
+```{r}
+library(gratia)
+
+# Plot smooth effects
+draw(model_nee, select = "s(air_temperature):crop_stage_simple", partial_match = TRUE)
+draw(model_nee, select = "s(VPD)", partial_match = TRUE)
+```
+
+### Recovery vs Regrowth Comparison (Alfalfa)
+```{r}
+# Filter to alfalfa and post-harvest stages
+alfalfa_data <- data %>%
+  filter(current_crop == "alfalfa hay",
+         crop_stage_simple %in% c("recovery", "regrowth", "vegetative"))
+
+# Compare fluxes
+p <- ggplot(alfalfa_data, aes(x = crop_stage_simple, y = NEE_gapfilled,
+                              fill = crop_stage_simple)) +
+  geom_violin(alpha = 0.6, draw_quantiles = 0.5) +
+  geom_jitter(alpha = 0.3, width = 0.2) +
+  scale_fill_manual(values = stage_colors[c("recovery", "regrowth", "vegetative")],
+                    guide = "none") +
+  facet_wrap(~ last_harvest_same_crop, labeller = "label_both") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_flux() +
+  labs(title = "Alfalfa Post-Harvest Progression",
+       subtitle = "Recovery (days 0-5) vs Regrowth (days 5-15) vs Vegetative",
+       x = "Stage",
+       y = expression(NEE~(µmol~CO[2]~m^-2~s^-1)))
+
+print(p)
+```
+
+### Custom Color Schemes
+```{r}
+
+# Modify the default colors
+stage_colors_custom <- c(
+  "fallow" = "#E8E8E8",
+  "recovery" = "#D32F2F",
+  "early" = "#81C784",
+  "regrowth" = "#4CAF50",
+  "vegetative" = "#2196F3",
+  "reproductive" = "#FF4081",
+  "grain_fill" = "#FF9800",
+  "mature" = "#795548",
+  "dormant" = "#9E9E9E"
+)
+
+# Use in plots
+p <- plot_flux_by_stage(data, "NEE") +
+  scale_fill_manual(values = stage_colors_custom, guide = "none")
+p
+```
+
+## Tips and Best Practices
+
+### 1. Check Data Distribution
+```{r}
+# Before modeling, check sample sizes
+table(data$crop_stage_simple)
+table(data$crop_stage_simple, data$management)
+```
+
+### 2. Handle Outliers
+```{r}
+# Option 1: Filter extreme values
+data_filtered <- data %>%
+  filter(NEE > quantile(NEE, 0.01, na.rm = TRUE),
+         NEE < quantile(NEE, 0.99, na.rm = TRUE))
+
+# Option 2: Winsorize
+library(DescTools)
+data$NEE_winsorized <- Winsorize(data$NEE, val = c(0.01, 0.99))
+```
+
+### 3. Model Diagnostics
+```{r}
+# Use gratia for comprehensive diagnostics
+library(gratia)
+
+appraise(model_nee)
+
+# Check concurvity
+concrvity(model_nee)
+
+# Check basis dimensions
+gam.check(model_nee)
+```
+
+### 4. Compare Models
+```{r}
+# Fit multiple models
+model1 <- gam(NEE ~ crop_stage_simple + s(air_temperature), data = data)
+model2 <- gam(NEE ~ crop_stage_simple + s(air_temperature, by = crop_stage_simple), 
+              data = data)
+
+# Compare AIC
+AIC(model1, model2)
+
+# ANOVA comparison
+anova(model1, model2, test = "F")
+```
+
+### 5. Publication-Ready Exports
+```{r}
+# High-resolution for publication
+ggsave("figure1.png", plot, width = 7, height = 5, dpi = 600)
+ggsave("figure1.pdf", plot, width = 7, height = 5)  # Vector format
+ggsave("figure1.tiff", plot, width = 7, height = 5, dpi = 300, compression = "lzw")
+```
+
+## Troubleshooting
+
+### Issue: "Object not found" errors
+```{r}
+# Make sure all required columns exist
+required_cols <- c("date", "NEE_gapfilled", "GPP_gapfilled", "Reco_gapfilled",
+                   "crop_stage_simple", "management", "air_temperature")
+missing <- setdiff(required_cols, names(data))
+if (length(missing) > 0) {
+  stop("Missing columns: ", paste(missing, collapse = ", "))
+}
+```
+
+### Issue: Plots look crowded
+```{r}
+
+# Filter to specific stages or time periods
+data_subset <- data %>%
+  filter(crop_stage_simple %in% c("vegetative", "reproductive", "mature"),
+         year(date) == 2021)
+
+plot_flux_by_stage(data_subset, "NEE_gapfilled")
+```
+
+### Issue: GAM won't converge
+```{r}
+# Reduce basis dimension
+model <- gam(NEE ~ s(air_temperature, k = 4), data = data)  # Lower k
+
+# Or use different optimizer
+model <- gam(NEE ~ s(air_temperature), data = data, optimizer = "optim")
+```
+
+## Additional Resources
+```{r}
+# -   **mgcv documentation:** `?gam`, `?s`, `?ti`
+# -   **gratia package:** For modern GAM visualization
+# -   **GAM tutorial:** Wood (2017) - Generalized Additive Models: An Introduction with R
+# -   **Color palettes:** viridis, RColorBrewer, ggsci packages
+
+## Contact
+
+For questions or issues with these scripts, check: 1. Your data structure matches expected format 2. All required packages are installed 3. GAM model converged successfully 4. Column names match those used in functions

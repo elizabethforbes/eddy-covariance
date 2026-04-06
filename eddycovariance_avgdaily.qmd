@@ -55,7 +55,7 @@ library(here)
 
 source(here("R scripts", "datacleaning_EC.r"))
 source(here("R scripts", "datacleaning_chambers.r"))
-source(here("R scripts", "datacleaning_PAR_attowers.r"))
+# source(here("R scripts", "datacleaning_PAR_attowers.r"))
 source(here("R scripts", "datacleaning_management.r"))
 
 ```
@@ -65,7 +65,7 @@ source(here("R scripts", "datacleaning_management.r"))
 Using a custom function, calculate continuous variables for each management action. The custom function is informed by characteristics like the expected crop-specific phenology, and days since actions like tillage.
 
 ```{r managementdatamerge}
-source(here("R scripts", "merge_management_data_covercropsandperennials_v3_5_2.r"))
+source(here("R scripts", "merge_management_data_covercropsandperennials_v3_6_0_6.r"))
 
 ec_daily_mngmnt <- create_management_vars_multicrop(
   ec_daily_avg,
@@ -184,10 +184,10 @@ Model testing, average NEE over time: simple with main effects, then with differ
 library(mgcv)
 
 # make sure management is in factor form
-ec_daily_mngmnt4$management <- factor(as.character(ec_daily_mngmnt4$management))
+ec_daily_mngmnt$management <- factor(as.character(ec_daily_mngmnt$management))
 # same for crop stage:
-ec_daily_mngmnt4$crop_stage_simple <- factor(
-  ec_daily_mngmnt4$crop_stage_simple,
+ec_daily_mngmnt$crop_stage_simple <- factor(
+  ec_daily_mngmnt$crop_stage_simple,
   levels = c("mature", "early", "vegetative", "reproductive", "grain_fill", "dormant", "fallow")
 )
 

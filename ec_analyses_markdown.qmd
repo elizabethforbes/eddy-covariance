@@ -1,0 +1,275 @@
+---
+title: "EC data analyses: Hudson Carbon"
+format: html
+editor: visual
+execute:
+  echo: true       # shows code
+  warning: false    # hides warnings
+  message: false    # hides messages
+  error: false      # hides errors (optional, use carefully)
+  output: true     # standard output (like print results)
+---
+
+## Average daily fluxes analyses
+
+Load libraries:
+
+```{r libraries}
+#| warning: false
+library(tidyverse)
+library(readxl)
+library(readr)
+library(ggpubr)
+library(naniar)
+library(purrr)
+library(lubridate)
+library(hms)
+library(ggstance)
+library(visibly)
+library(mgcv) # visualizing gam model results in Dharma
+library(DHARMa)
+library(gratia)
+library(zoo)
+library(GGally)
+library(corrplot)
+library(emmeans)
+library(here)
+```
+
+Upload via 'source' function and previously-written R scripts.
+
+```{r data_upload}
+#| warning: false
+
+source(here("R scripts", "merging_data_with_management.r"))
+# read_csv("ec_with_mngngment_final.csv") # for ease: manually adjusted version, though the script above ultimately also uploads the manually adjusted version
+```
+
+------------------------------------------------------------------------
+
+## GAM: EC fluxes, daily average
+
+### NEE: management and crop stage
+
+```{r}
+#| output = FALSE
+source(here("R scripts", "gam_avgdaily_cropstage_NEE.r"))
+```
+
+#### NEE data:
+
+Below is a plot of trends in daily average NEE (gC/m2/day; negative = carbon sink, positive = carbon source) over the course of the measurement period 2018-2020 (n = 1,028 total field-days), during which time the fields had similar crop cycles: corn, soybeans, then barley. Differences in management included use of cover crops (consistent in organic field; later adoption in conventional field) and differences in tillage strategy. Data are categorized by 'crop stage', where each daily average was assigned a crop stage using a logic-based script that calculated approximate phenological development. Annual crop logic relied on days since planting; cover crops and overwintering crop logic relied on a combination of factors including days since planting, days since harvest, soil and air temperature (ERA5 modeled values for each location), NDVI, and rate of change in NDVI (ERA5 modeled values for each location). Final adjustments were made manually in the case of a hay crop undersown with barley (organic field, 2020), the growth of which passed germination but was suppressed until barley harvest.
+
+```{r}
+#| warning: false
+p2
+```
+
+Initial visual assessment makes it clear that the organic field is either equivalent to or more of a sink for atmospheric CO2 than the conventional field, across all crop stages.
+
+To tease out the mechanistic drivers of the above observations, I used a bam() model approach that integrates smoothing functions into its structure to account for nonlinear drivers. The model simultaneously accounts for crop phenological stage, management system, day-of-year seasonality, the joint effects of air temperature and vapor pressure deficit (VPD), year-to-year variation, and time since tillage. Because all predictors are estimated simultaneously, each term reflects its contribution after holding the others constant — so crop stage effects, for example, represent management × phenology differences after climate conditions are accounted for. The model explains 70.6% of variance in daily NEE (adjusted R² = 0.689). Because NEE is significantly autocorrelated on a day-to-day basis, I integrated an autocorrelation coefficient (rho; here, 0.41) that reflected first order (day-to-day) autocorrelation of the original model's uncorrected residuals; in plain terms, the relationship between today's observed error and the prior day's observed error.
+
+final model formula: NEE \~ management \* crop_stage_simple + s(year_f, bs = "re", by = as.factor(management)) + s(doy, bs = "cc", k = 20) + te(air_temperature, VPD, by = as.factor(management), k = c(8, 8)) + s(days_since_tillage, by = as.factor(management), k = 8)
+
+#### Model outputs: parametric predictors
+
+```{r}
+# print model outputs:
+tbl_nee_parametric
+```
+
+Walking through the outputs of the model, parametric coefficients first: all estimates are relative to the reference condition, which is conventional management at the mature crop stage. The intercept (\~0.20, ns) indicates conventional at mature crop stages is essential neutral after correcting for climate conditions: neither a source nor a sink of CO2. The main effects of crop stage on the conventional reference field are at the grain fill stage (where the conventional field becomes a significantly stronger sink relative to mature) and the reproductive stage (an even larger sink). The other stages (dormant, early, vegetative, and fallow) do not differ from mature.
+
+Interpretation: after accounting for climate, conventional carbon cycling is strongly stage-structured: the field shows peak sink dynamics during grain fill and reproductive stages of crop growth, and is relatively unaffected during the other stages.
+
+In terms of how organic management departs from conventional, during both grain fill and reproductive crop stages, the effect is to nearly cancel out the sink effect seen on the conventional field. There is no other effect of organic\*stage interaction. While this is initially counterintuitive, what the result really means is that after climate correction the organic field does not have stage-structured variation in NEE, and no peak-season enhancement of its sink capacities like we see in the conventional field. The takeaway here is that the mechanism of carbon uptake in the organic field differs from that in the conventional field. While the raw data (above) show the opposite pattern (that organic is a substantially stronger sink at grain fill, for example), the predicted estimates reflect mean climate conditions. Further investigation of NEE climate sensitivity (below) will demonstrate further that the organic field has superior carbon uptake in warm, dry conditions, and that the main mechanism for increased uptake is not crop stage but climate resilience.
+
+#### Effect size: management and crop stage
+
+```{r}
+p1
+```
+
+#### Predicted NEE: climate-corrected
+
+```{r}
+p3
+```
+
+#### Model outputs: smoothing functions
+
+```{r}
+tbl_nee_smooths
+```
+
+The smooth terms indicate highly nonlinear relationships between NEE and season (DOY), which is expected given seasonal cycles of productivity and carbon uptake. This is common to both fields/management regimes. There is also significant year-to-year variation in both fields, which again is to be expected given what we know about the different patterns of drought and winter weather in the observation period. While days since tillage does not influence NEE in the conventional field, there is a significant linear (EDF = 1) effect in the organic field, indicating that the tillage-induced release of soil carbon declines over time.
+
+#### Effect of climate on NEE by management
+
+```{r}
+#| warning: false
+p4
+```
+
+The main takeaway, however, is the joint effect of air temperature and VPD as illustrated in the above heat map. As air temperature and VPD increase (e.g., warmer and drier), the conventional field moves from a sink to neutral, then a source of CO2. However, the organic field maintains its ability to act as a carbon sink specifically during these same warm, dry conditions; this is likely the explanation for organic's stronger sink dynamics in the grain fill stage when not correcting for climate variables. Grain fill generally occurs in dry, warm summertime conditions, which are those in which the organic field outperforms the conventional field (above). Because the model parses out this advantage into a smooth term rather than a parametric term, we are able to identify not only patterns in NEE across the fields but also that the two fields have different primary drivers of NEE over a year.
+
+#### NEE takeaways:
+
+The two management systems differ not in whether they capture carbon; on average, they both capture carbon. However, the two differ in terms of how that capture is structured. In the conventional field, carbon capture is strongly dependent on crop stage, and peaks at grain fill and reproductive stages. In contrast, the organic field doesn't seem dependent on crop stage after correcting for climate variables; however, it has a distinct advantage in warm, dry conditions -- those conditions that crops experience in the peak of summer, and growing season, in the region. These findings suggest that organic soil management may confer climate resilience in terms of carbon uptake, maintaining productivity under conditions that suppress conventional field carbon exchange.
+
+------------------------------------------------------------------------
+
+### GPP: management and crop stage
+
+```{r}
+#| output: false
+#| include: false 
+source(here("R scripts", "gam_avgdaily_cropstage_GPP.r"))
+```
+
+#### GPP data:
+
+Here we observe that on balance, the organic field tends to have higher GPP across life stages with the exception of fallow, early, and dormant life stages. As these represent periods of no or low metabolic activity, that outcome is to be expected.
+
+```{r}
+#| warning: false
+g2
+```
+
+#### Model outputs: parametric parameters
+
+The GPP model shares the same model structure as the NEE model (bam, AR1 correction with rho = 0.600, n = 1,028). GPP, however, is always positive and here represents gross daily atmospheric carbon dioxide taken up by plant photosynthesis. The model explains \~83.3% of variance in daily GPP (adj. R-squared = 0.823), an even better fit than the NEE model, which is likely because GPP is more coupled to temperature and light than NEE is. As with NEE, the model accounts for climatic variables using the full tensor product smooth of the interaction between air temperature and vapor pressure deficit (indicator of ambient moisture stress for photosynthesizing plants).
+
+final model formula: GPP \~ management \* crop_stage_simple + s(year_f, bs = "re", by = as.factor(management)) + s(doy, bs = "cc", k = 20) + te(air_temperature, VPD, by = as.factor(management), k = c(8, 8)) + s(days_since_tillage, by = as.factor(management), k = 8)
+
+```{r}
+tbl_gpp_parametric
+```
+
+Again, the reference condition is conventional management and mature crop stage. The baseline condition of \~3.5 is significant here, indicating that photosynthesis is meaningful at this stage. In comparison to the mature phase, grain fill and reproductive have significantly higher rates of photosynthesis and carbon uptake. This aligns with the metabolic needs of the plants during these phases, indicating allocation of photosynthates to grain development and maximum canopy light interception. Conversely, the fallow stage has significantly lower GPP rates compared to mature, which is also expected given the condition indicates no active crop canopy. No other phase (dormant, vegetative, early) shows significant deviations from the mature stage in the conventional field.
+
+Organic patterns of GPP depart from conventional in several key ways. When accounting for climate, organic GPP at grain fill is significantly lower (by almost 4gC/m2/day) than conventional, canceling out the conventional grain fill advantage when compared to mature. Less severe but noteworthy is (non-significantly) lower GPP during the reproductive stage.
+
+In summary, what this all indicates is that the conventional field's stage-dependent patterns of carbon uptake (becoming a net sink, as shown in NEE model above) are likely driven by enhanced photosynthesis during the grain fill and reproductive crop stages. After climate correction, GPP in the organic field is not stage-dependent.
+
+#### Effect size: management and crop stage
+
+```{r}
+g1
+```
+
+#### Predicted GPP: climate-corrected
+
+```{r}
+g3
+```
+
+#### Model outputs: smoothing functions
+
+```{r}
+tbl_gpp_smooths
+```
+
+In both fields, there is significant year-to-year variation; this is expected given what we know of the variable climate conditions (which then relate directly to rainfall levels, heat stress intensity and duration, and growing degree day accumulation) during the observation period. Seasonality is also a significant driver of variation, as it was for NEE patterns. For both fields, the interacting effects of air temperature and VPD are highly significant drivers of variation in photosynthetic uptake, with the organic field showing a slightly more complex response (EDF = 13.37). Lastly, and again similarly to the patterns observed for NEE, days since tillage is a significant source of variation in GPP, the effect of which linearly decomposes over time.
+
+#### Effect of climate on GPP by management
+
+```{r}
+#| warning: false
+g4
+```
+
+As shown in above in the figure showing the joint effect of air temperature and VPD on GPP across both fields, once again the organic field demonstrates greater resilience to hot, dry conditions in its capacity to take up atmospheric carbon via photosynthesis. Again, these conditions are those to be expected during summer months, aka peak growing season; as such the empirical data shows higher rates of GPP during grain fill and reproductive stages in the organic field as compared to the conventional one, an advantage that is corrected for when climate variables are parsed out as a smoothing term (rather than parametric).
+
+#### GPP takeaways:
+
+The two management systems both demonstrate changes in rates of GPP that make biological sense according to crop stage. As for NEE, crop stage is highly correlated with GPP in the conventional field, peaking in the grain fill and reproductive stages; as for NEE, organic GPP is not dependent on crop stage. The organic field does seem to have a climate advantage in hot, dry conditions when it comes to GPP, taking up relatively more atmospheric carbon through photosynthesis for longer during conditions that have reduced GPP in the conventional field (e.g. heat, drought). The findings seem to suggest that ability to maintain photosynthesis during stressful climate conditions is an advantage of the organic management system.
+
+------------------------------------------------------------------------
+
+### Ecos Resp: management and crop stage
+
+```{r}
+#| output = FALSE
+source(here("R scripts", "gam_avgdaily_cropstage_Reco.r"))
+```
+
+#### Ecos. resp. data:
+
+Here we observe that on balance, the organic field has higher ecosystem respiration in the vegetative, reproductive, and mature stages of crop development, but lower during fallow, early, grain fill, and dormant stages (when compared to the same life stages in the conventional field).
+
+```{r}
+#| warning: false
+r2
+```
+
+The model for ecosystem respiration differed in specification thanks to the fact that the residuals are highly temporally autocorrelated from day to day; while this is true for NEE and GPP as well, ecosystem respiration is even more temporaly autocorrelated given its tight coupling to soil temperature, which changes more slowly over time than air temperature does.
+
+I used a generalized additive mixed model (gamm; gam() and lme() components) approach with a corARMA correlation structure nested within management and year. I used 7-day moving averages of both air temperature and VPD (rather than daily average values, as I did for NEE and GPP analyses) to better capture that inertia in the conditions that drive soil respiration. (In short: soil temperature will lag behind air temperature and moisture levels but eventually respond, creating a lag.) Note: the R-squared of the model (-0.465) is an artifact of gamm() reporting, which returns R2 for the GAM component of the model only after the AR correlation structure as absorbed most of the observed variance. As such the R2 does not reflect poor model fit, but that a large proportion of the day-to-day variance is explained by the autocorrelation structure in the model.
+
+#### Model outputs: parametric parameters
+
+```{r}
+tbl_reco_parametric
+```
+
+There are no significant deviations from the reference mean ecosystem respiration rate (conventional mature; \~2.6gC/m2/day) for any crop stage; similarly, when accounting for climate, there is no meaningful varying in ecosystem respiration across management systems.
+
+This all tracks with the ecology and biology of the system: ecosystem respiration is far more driven by climate variables than by crop phenology (though crop phenology does play a role in terms of carbon allocation belowground, post-harvest stress, etc.). Once climate variation is corrected for in the model, neither of the primary variables (management, crop stage) demonstrate significant explanatory power.
+
+#### Effect size: management and crop stage
+
+```{r}
+r1
+```
+
+#### Predicted R_eco: climate-corrected
+
+```{r}
+r3
+```
+
+#### Model outputs: smoothing functions
+
+```{r}
+tbl_reco_smooths
+```
+
+There is no effect of inter-annual variability on ecosystem respiration, unlike both NEE and GPP. However, there is a strongly significant relationship between ecosystem respiration and seasonality (DOY), which is to be expected given that climate is a known driver; indeed, the bulk of predicted respiration should follow seasonal temperature changes.
+
+The interacting effects of air temperature (7-day average) and VPD (7-day average) are also significant in driving ecosystem respiration, and indeed this effect diverges across the two fields. Days since tillage also does not demonstrate a signal in driving respiration in either field, unlike for GPP (organic); this result indicates that tillage primarily influences productivity (GPP) in the organic system, and not respiration. This is interesting and potentially worth probing further, as tillage (hypothetically) exposes soil carbon to air and creates a pulse of efflux; however it's also possible that these tillage events occur mainly in periods of high respiration already, and are parsed out by climate data.
+
+The conventional field shows a fairly simple climate response, with an EDF of 3.00. However, there is a highly complex and non-linear (EDF = \~25) effect of climate in the organic field, demonstrating a much more complicated relationship. A large proportion of ecosystem respiration comes from soil respiration; it is possible that the organic field's soil is more biologically complex and/or active, has greater organic matter content which would result in greater fuel sources for microbial community, etc. In short, management doesn't really influence how much respiration occurs at each crop stage, but it does influence how the system responds to climate drivers – consistent with the other two fluxes.
+
+#### Effect of climate on R_eco by management
+
+```{r}
+#| warning: false
+r4
+```
+
+The complexity of the relationship between climate and respiration is demonstrated in the heatmap above, where it is clear that there is a large 'middle ground' of climate conditions (\~10-20C, low to moderate VPD) during which the organic field exhibits low respiration rates, relative to its own mean. These conditions are typical to those that the field is experiencing for most of the growing season, indicating that organic soils under typical summer conditions are respiring less than they do in other weather. However, higher VPD (e.g., dry conditions) across a wider temperature range drives relatively high/elevated respiration in organic. In short: when air is hot and dry (high evaporative pressure for plants), respiration spikes in the conventional field in a way that does not occur in the conventional field. This might be due to the (probable) higher abundance and diversity of soil microbes, with more substrate available as organic matter, that become active during stressful (dry) conditions.
+
+In contrast, the low complexity (EDF = 3) of the relationship that the conventional field has with climate is very straightforward. There is not a hugely compelling relationship with evaporative stress (VPD), and as air temperatures increase, so does respiration. This indicates that, while following expected patterns, the biology of the soil is likely not as complex/diverse/active in the conventional field as that in the organic field.
+
+#### Ecos. Resp. takeaways:
+
+The outcomes of the ecosystem respiration analysis reveal that there is not crop-stage dependence for either field, unlike GPP and NEE (for which the conventional field has high crop-stage dependence). The biggest takeaway is that the observed patterns in NEE are likely driven by management and crop-stage differences in GPP, not respiration. Additionally, the climate dependence in both fields for respiration makes biological sense; however, there are distinct differences in the complexity of that dependence, indicating that soil health is likely elevated in the organic field and producing variability that does not exist for the conventional soil.
+
+# Final takeaways:
+
+## Main driver of differences in NEE: photosynthesis
+
+The biggest driver of difference in rates of NEE seems to be photosynthesis related, not respiration related; the two systems do not seem to diverge in terms of how much they respire, on average. The conventional field demonstrates a peak in NEE (sink enhancement) during grain fill and reproductive stages of crop development, which pairs with its similarly enhanced GPP and unaffected ecosystem respiration during those stages. The organic field maintains an edge over conventional in rates of GPP when weather conditions are hot and dry; since these conditions are likeliest to occur in summer (which is also peak growing and crop maturation season), and despite its lack of dependence on crop stage, organic NEE overtakes the stage-dependence of the conventional field's sink dynamics (which peak in grain fill and reproductive stages).
+
+## Mechanisms of C cycling by management
+
+This result shows that the drivers of carbon cycling in each system are coupled to entirely different mechanisms – the conventional field's carbon cycle is coupled to crop phenology (strong stage structure for NEE, GPP), while the organic field's is coupled to climate (flat stage profile in NEE, GPP after climate correction; greater complexity in climate sensitivity in GPP, Reco).
+
+## Unadjusted patterns explained by mechanism
+
+The advantage of organic in the grain-fill stage observed in the unadjusted data reflects that field's climate sensitivity, not necessarily the physiology of that stage – that stage occurs in the growing season, summer, during which the GPP of the conventional field declines. As such the advantage of organic is real; however, it's driven by climate resilience rather than inherently higher GPP at grain fill compared to conventional.
+
+## Tillage: further questions and possible drivers
+
+Tillage seems to influence the organic field's productivity but not its respiration, with significant linear effects for both GPP and NEE (not observed for organic Reco, or any flux in conventional). This indicates that perhaps tillage disturbs photosynthetic recovery in the organic field, perhaps if soil structure (physical structure, organic amendments, cover cropping) plays a more outsized role in crop productivity than in the conventionally-managed field. Thus, if that structure is disturbed, there is a significant and linearly-decomposing negative effect on GPP until structure is re-established.
