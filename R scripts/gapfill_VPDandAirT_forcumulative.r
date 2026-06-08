@@ -148,16 +148,16 @@ plot <- ggplot(df, aes(x = observed_VPD_kPa, y = calculated_vpd_empirical)) +
   ) +
   
   # second linear regression (ERA5-based data calculation):
-  geom_smooth(aes(y = calculated_vpd_era5), method = "lm", se = FALSE, color = "lightpink") +
+  geom_smooth(aes(y = calculated_vpd_era5), method = "lm", se = FALSE, color = "maroon") +
   stat_poly_eq(
     aes(y = calculated_vpd_era5, label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
-    formula = y ~ x, parse = TRUE, color = "lightpink",
+    formula = y ~ x, parse = TRUE, color = "maroon",
     label.x = 0.05, label.y = 1
   ) +
   
   labs(
   x = "Observed VPD (kPa)",
-  y = "ERA5 VPD (pink), observed climate data (blue) (kPa)"
+  y = "ERA5 VPD (maroon), calculated with observed climate data (blue) (kPa)"
   ) +
   theme_minimal()
 
@@ -231,3 +231,4 @@ df %>%
     n_vpd_still_na  = sum(is.na(VPD_filled)),
     .groups = "drop"
   ) %>% print()
+

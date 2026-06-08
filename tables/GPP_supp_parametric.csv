@@ -1,0 +1,15 @@
+term,term_raw,Estimate,SE,t,p,sig
+Intercept,(Intercept),3.491,1.119,3.12,0.002,**
+Organic,managementorganic,-0.738,1.696,-0.435,0.664,
+Dormant,crop_stage_simpledormant,0.058,0.945,0.061,0.951,
+Early growth,crop_stage_simpleearly,-0.884,0.739,-1.197,0.232,
+Fallow,crop_stage_simplefallow,-1.63,0.696,-2.343,0.019,*
+Grain fill,crop_stage_simplegrain_fill,3.253,0.812,4.009,0,***
+Reproductive,crop_stage_simplereproductive,4.139,1.029,4.024,0,***
+Vegetative,crop_stage_simplevegetative,0.041,0.712,0.058,0.954,
+Organic × Dormant,managementorganic:crop_stage_simpledormant,0.403,1.251,0.322,0.748,
+Organic × Early growth,managementorganic:crop_stage_simpleearly,0.221,1.212,0.182,0.855,
+Organic × Fallow,managementorganic:crop_stage_simplefallow,-1.173,1.826,-0.642,0.521,
+Organic × Grain fill,managementorganic:crop_stage_simplegrain_fill,-3.982,1.189,-3.35,0.001,***
+Organic × Reproductive,managementorganic:crop_stage_simplereproductive,-2.692,1.539,-1.749,0.081,.
+Organic × Vegetative,managementorganic:crop_stage_simplevegetative,-0.263,1.187,-0.222,0.825,

@@ -263,7 +263,7 @@ tbl_gpp_parametric <- broom::tidy(bam_GPP, parametric = TRUE) %>%
     fns = function(x) ifelse(x < 0.001, "<0.001", sprintf("%.3f", x))
   ) %>%
   tab_header(
-    title    = md("**Table 1. Parametric coefficients: NEE GAM (bam_NEE)**"),
+    title    = md("**Table 1. Parametric coefficients: GPP GAM (bam_GPP)**"),
     subtitle = md("Reference: conventional management, mature crop stage")
   ) %>%
   tab_style(
@@ -304,7 +304,7 @@ tbl_gpp_smooths <- broom::tidy(bam_GPP, parametric = FALSE) %>%
     fns = function(x) ifelse(x < 0.001, "<0.001", sprintf("%.3f", x))
   ) %>%
   tab_header(
-    title    = md("**Table 2. Smooth terms: NEE GAM (bam_NEE)**"),
+    title    = md("**Table 2. Smooth terms: GPP GAM (bam_GPP)**"),
     subtitle = md("Approximate significance; EDF = effective degrees of freedom")
   ) %>%
   tab_style(
@@ -323,20 +323,36 @@ tbl_gpp_smooths
 # Visualizations
 # -----------------------------------------------------------------------------
 
-source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+# source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+source(here::here("R scripts", "plot_databymanagement.r"))
+source(here::here("R scripts", "plot_te_difference.r"))
+
 
 # Main finding figure ---------------------------------------------------------
-g1 <- plot_coef_plot(bam_GPP, flux_var = "GPP")
+# g1 <- plot_coef_plot(bam_GPP, flux_var = "GPP")
 
 # Raw observed means, by management x stage — no climate correction -----------
 g2 <- plot_management_comparison(data1, flux_var = "GPP")
+g2  + coord_cartesian(ylim = c(-5, 20))    # before saving / returning
+
+# difference plot for te() surface: effects of climate on VARIABLE as indicated
+# by the difference in organic - conventional
+
+g_te <- plot_te_difference(model           = bam_GPP,
+                           data            = data1,
+                           flux_var        = "GPP",
+                           temp_var        = "air_temperature",
+                           climate_var     = "VPD",
+                           better_direction = "positive",
+                           layout          = "temp_vpd")
+g_te
 
 # Predicted NEE by stage ------------------------------------------------------
-g3 <- plot_predicted_by_stage(bam_GPP, data1, flux_var = "GPP")
+# g3 <- plot_predicted_by_stage(bam_GPP, data1, flux_var = "GPP")
 # corrected for climate (VPD and air temperature)
 
 # Plot the te() surface: effects of VPD*temperature on NEE across management --
-g4 <- plot_te_surface(bam_GPP, data1, flux_var = "GPP")
+# g4 <- plot_te_surface(bam_GPP, data1, flux_var = "GPP")
 # organic maintains higher atmospheric fixation through primary productivity
 # in hot, dry conditions, more so than the conventional field. Its atmospheric 
 # fixation potential is much higher at cold, humid levels than conventional; probably
@@ -344,8 +360,20 @@ g4 <- plot_te_surface(bam_GPP, data1, flux_var = "GPP")
 # (temp > 20C, VPD < 1000) the organic field maintains a positive productivity level
 # while the conventional field is non-productive.
 
-# -- Model performance --------------------------------------------------------
-g5 <- plot_gam_observed_vs_predicted(bam_GPP, data1, flux_var = "GPP")
+# g4 + # add corner labels: 
+#   annotate("label", x = -10, y = .1,  label = "cool & humid air\n(low demand)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = 22,  y = .1,  label = "warm & humid air\n(productive)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = -10, y = 1.9, label = "cool & dry air\n(uncommon)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = 22,  y = 1.9, label = "hot & dry air\n(drought stress)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75))
 
-# Residuals by crop stage: check for systematic stage-level bias
-g6 <- plot_gam_residuals_by_stage(bam_GPP, data1, flux_var = "GPP")
+# 
+# # -- Model performance --------------------------------------------------------
+# g5 <- plot_gam_observed_vs_predicted(bam_GPP, data1, flux_var = "GPP")
+# 
+# # Residuals by crop stage: check for systematic stage-level bias
+# g6 <- plot_gam_residuals_by_stage(bam_GPP, data1, flux_var = "GPP")
+

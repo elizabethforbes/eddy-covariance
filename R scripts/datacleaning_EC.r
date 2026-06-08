@@ -4,6 +4,7 @@ library(purrr)
 library(lubridate)
 library(hms)
 library(here)
+library(gt)
 
 # ============================================================================
 # 1. upload eddy covariance data from project folder:
@@ -82,6 +83,9 @@ ec_daily_avg <- all_ec_filtered %>%
   select(!c(soilt1_era5, soilt2_era5, vwc1_era5, vwc2_era5)) %>% 
   group_by(management, date) %>% 
   summarize(
+    Reco_n = sum(!is.na(Reco)),
+    NEE_n = sum(!is.na(NEE)),
+    GPP_n = sum(!is.na(GPP)),
     Reco_se = sd(Reco, na.rm = TRUE) / sqrt(sum(!is.na(Reco))),
     NEE_se = sd(NEE, na.rm = TRUE) / sqrt(sum(!is.na(NEE))),
     Reco_gf_se = sd(Reco_gapfilled, na.rm = TRUE) / sqrt(sum(!is.na(Reco_gapfilled))),
@@ -147,3 +151,6 @@ ec_daily_avg <- ec_daily_avg %>%
 
 # ec_weekly_avg <- ec_weekly_avg %>% 
 #   filter(!(management == "conventional" & date < "2018-04-30"))
+
+
+

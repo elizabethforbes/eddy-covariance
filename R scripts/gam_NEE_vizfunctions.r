@@ -22,6 +22,7 @@ library(patchwork)
 library(scales)
 library(mgcv)
 library(gratia)
+library(stringr)
 
 # ============================================================================
 # THEME SETTINGS - Publication Quality
@@ -68,8 +69,8 @@ stage_colors <- c(
 
 # Color palette for management
 management_colors <- c(
-  "conventional" = "#E74C3C",  # Red
-  "organic" = "#27AE60"        # Green
+  "conventional" = "tomato",  # Red
+  "organic" = "#E69F00"        # Green
 )
 
 # ============================================================================
@@ -481,6 +482,7 @@ plot_management_comparison <- function(data, flux_var = "NEE") {
     geom_col(position = position_dodge(0.9), alpha = 0.8) +
     geom_errorbar(aes(ymin = mean_flux - se_flux, ymax = mean_flux + se_flux),
                   position = position_dodge(0.9), width = 0.2) +
+    geom_jitter() +
     
     # Zero line
     geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
@@ -546,7 +548,7 @@ plot_flux_heatmap <- function(data, flux_var = "NEE",
     
     # Color scale
     scale_fill_gradient2(
-      low = "blue", mid = "white", high = "red", midpoint = 0,
+      low = "tan3", mid = "white", high = "forestgreen", midpoint = 0,
       name = bquote(.(flux_var) ~ "(µmol" ~ CO[2] ~ m^-2 ~ s^-1 ~ ")")
     ) +
     
@@ -627,15 +629,11 @@ plot_te_surface <- function(model, data, flux_var = "NEE",
 
   # Extract 2D smooth estimates for te() terms
   te_est <- gratia::smooth_estimates(model, unconditional = TRUE) %>%
-    dplyr::filter(grepl("^te\\(", .smooth))
-
-  # Label management type from smooth name
-  te_est <- te_est %>%
+    gratia::add_confint() %>%
+    dplyr::filter(grepl("^te\\(", .smooth)) %>%
     dplyr::mutate(
-      Management = dplyr::case_when(
-        grepl("conventional", .smooth) ~ "Conventional",
-        grepl("organic",      .smooth) ~ "Organic",
-        TRUE ~ .smooth
+      Management = stringr::str_to_title(
+        as.character(.data[["as.factor(management)"]])
       )
     )
 
@@ -645,22 +643,22 @@ plot_te_surface <- function(model, data, flux_var = "NEE",
     dplyr::mutate(Management = stringr::str_to_title(management))
 
   p <- ggplot(te_est,
-              aes(x = .data[[temp_var]], y = .data[[vpd_var]],
+              aes(x = .data[[temp_var]], y = .data[[vpd_var]]/1000,
                   fill = .estimate)) +
     geom_tile() +
     # Observed data as translucent points
     geom_point(data = obs,
-               aes(x = .data[[temp_var]], y = .data[[vpd_var]]),
+               aes(x = .data[[temp_var]], y = .data[[vpd_var]]/1000),
                inherit.aes = FALSE,
-               colour = "white", alpha = 0.15, size = 0.4) +
+               colour = "black", alpha = 0.15, size = 0.75) +
     scale_fill_gradient2(
-      low = "#2166ac", mid = "white", high = "#d73027", midpoint = 0,
+      low = "tan3", mid = "white", high = "forestgreen", midpoint = 0,
       name = bquote(Delta ~ .(flux_var) ~ "\n(g C m"^-2 ~ "d"^-1 ~ ")")
     ) +
     facet_wrap(~ Management, ncol = 2) +
     labs(
-      title    = bquote("Joint temperature \u00d7 VPD effect on" ~ .(flux_var)),
-      subtitle = "Partial effect of te(air_temperature, VPD); white points = observed data",
+      title    = bquote("Combined effect of climate variables on" ~ .(flux_var) ~ "relative to average"),
+      subtitle = "dark points = observed data",
       x        = "Air temperature (\u00b0C)",
       y        = "VPD (kPa)"
     ) +
@@ -688,12 +686,11 @@ plot_tillage_smooth <- function(model, data, flux_var = "NEE") {
 
   # Extract smooth estimates for the tillage terms
   till_est <- gratia::smooth_estimates(model, unconditional = TRUE) %>%
+    gratia::add_confint() %>%
     dplyr::filter(grepl("days_since_tillage", .smooth)) %>%
     dplyr::mutate(
-      Management = dplyr::case_when(
-        grepl("conventional", .smooth) ~ "Conventional",
-        grepl("organic",      .smooth) ~ "Organic",
-        TRUE ~ .smooth
+      Management = stringr::str_to_title(
+        as.character(.data[["as.factor(management)"]])
       )
     )
 
@@ -720,7 +717,7 @@ plot_tillage_smooth <- function(model, data, flux_var = "NEE") {
     facet_wrap(~ Management, ncol = 2, scales = "free_y") +
     labs(
       title    = paste0("Effect of days since tillage on ", flux_var),
-      subtitle = "Organic: nonlinear, p = 0.040 (EDF = 3.03)  |  Conventional: non-significant (p = 0.962)",
+      subtitle = "Conventional: non-significant (p = 0.962) | Organic: nonlinear, p = 0.040 (EDF = 3.03)",
       x        = "Days since tillage",
       # y        = bquote("Partial effect on" ~ .(flux_var) ~ "(g C m"^-2 ~ "d"^-1 ~ ")")
       y        = bquote("Partial effect on" ~ .(flux_var) ~ "(µmol" ~ CO[2] ~ m^-2 ~ s^-1 ~ ")")

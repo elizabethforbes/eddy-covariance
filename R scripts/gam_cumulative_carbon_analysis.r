@@ -330,10 +330,8 @@ print(gap_summary)
 #     IPCC (2006). 2006 IPCC Guidelines for National GHG Inventories, Volume 4:
 #     Agriculture, Forestry and Other Land Use, Chapter 11, Table 11.2. IGES, Japan.
 #   Carbon fraction — soybean (elevated vs. cereals due to ~20% lipid content):
-#     Monfreda, C., Ramankutty, N., & Foley, J.A. (2008). Farming the planet:
-#     2. Geographic distribution of crop areas, yields, physiological types,
-#     and net primary production in the year 2000. Global Biogeochemical Cycles
-#     22, GB1022.
+#     Watanabe I., 1976. Transformation Factor from CO2 Net Assimilation to Dry Matter in Crop Plants
+#     AGricultural and Food Sciences, Jarq-japan Agricultural Research Quarterly
 #   Carbon fraction — alfalfa hay (DM basis):
 #     Bolinder, M.A., et al. (2007). An approach for estimating net primary
 #     productivity and annual carbon inputs to soil for common agricultural
@@ -341,14 +339,36 @@ print(gap_summary)
 
 c_conv <- tribble(
   ~crop,         ~yield_units, ~kg_per_unit, ~moisture_corr, ~c_fraction, ~note,
-  "corn",        "bu/ac",      25.401,       0.845,          0.45,        "56 lb/bu at 15.5% std moisture (USDA FGIS 2013); C: IPCC (2006) Vol.4 Ch.11 Table 11.2",
-  "soybeans",    "bu/ac",      27.216,       0.870,          0.47,        "60 lb/bu at 13.0% std moisture (USDA FGIS 2013); C elevated due to lipid content (Monfreda et al. 2008)",
-  "barley",      "bu/ac",      21.772,       0.860,          0.45,        "48 lb/bu at 14.0% std moisture (USDA FGIS 2013); C: IPCC (2006) Vol.4 Ch.11 Table 11.2",
-  "alfalfa hay", "ton/ac",     907.185,      1.000,          0.45,        "Already on DM basis per management notes; C: Bolinder et al. (2007)"
+  "corn",        "bu/ac",      25.401,       0.845,          0.44,        
+  "56 lb/bu (page 1-27, table 1.9: USDA FGIS) at 15.5% std moisture (USDA FGIS 2013); C: IPCC (2006) Vol.4 Ch.11 Table 11.2",
+  # https://grains.org/corn_report/corn-harvest-quality-report-2018-2019/4/ confirms ~15-16% moisture content nationally
+  # https://corn.ces.ncsu.edu/news/harvesting-corn-what-grain-moisture-should-i-harvest-corn-at/ confirms that <= 15% is ideal
+  # https://www.smallfarmcanada.ca/resources/standard-weights-per-bushel-for-agricultural-commodities confirms standard weights in kg to lb
+  # https://courses.ecampus.oregonstate.edu/ans312/two/corn_trans.htm for general percentages of macronutrients that guide conversion to C content
+  # and https://www.feedtables.com/content/maize assuming that kCal/kg divided by 100 is approx. the carbon content of corn grain
+  
+  "soybeans",    "bu/ac",      27.216,       0.870,          0.51,        
+  "60 lb/bu (page 1-27, table 1.9: USDA FGIS) at 13.0% std moisture (USDA FGIS 2013); C elevated due to lipid content (Monfreda et al. 2008)",
+  # https://www.smallfarmcanada.ca/resources/standard-weights-per-bushel-for-agricultural-commodities standard conversion, lb to kg
+  # https://cropwatch.unl.edu/2018/enhancing-soybean-storage-starts-harvest-moisture/ confirms 13% market moisture content for storage
+  # Watanabe, 1976: soybeans themselves have approx. 51% carbon content at ripeness
+  
+  "barley",      "bu/ac",      21.772,       0.860,          0.42,        
+  "48 lb/bu (page 1-27, table 1.9: USDA FGIS) at 14.0% std moisture (USDA FGIS 2013); C: IPCC (2006) Vol.4 Ch.11 Table 11.2",
+  # https://www.smallfarmcanada.ca/resources/standard-weights-per-bushel-for-agricultural-commodities standard conversion, lb to kg
+  # https://extension.umn.edu/small-grains-harvest-and-storage/drying-wheat-and-barley confirms 13-14% moisture content for barley
+  # Rogers et al., 2025 indicates 42.2%C (from 422g/kg grain) (table 2)
+  
+  "alfalfa hay", "ton/ac",     907.185,      1.000,          0.45,        
+  "Already on DM basis per management notes; C: Bolinder et al. (2007)"
+  # assumes 0.45% on average of all aboveground plant parts
+  
 ) %>%
   mutate(
     # gC exported per unit yield per m²
-    gC_per_unit_per_m2 = kg_per_unit * moisture_corr * c_fraction / 4046.86 * 1000
+    gC_per_unit_per_m2 = kg_per_unit * moisture_corr * c_fraction / 4046.86 * 1000,
+    kgC_per_unit_per_m2 = kg_per_unit *moisture_corr *c_fraction / 4046.86
+    # reminder: 4046.86 (m² per acre) × 1000 (kg → g)
   )
 
 # Harvest events: one row per harvest date
@@ -369,14 +389,16 @@ harvest_events <- tribble(
     date = as.Date(date),
     doy  = as.integer(format(date, "%j"))
   ) %>%
-  left_join(c_conv %>% select(crop, gC_per_unit_per_m2), by = "crop") %>%
-  mutate(C_exported_gC_m2 = yield * gC_per_unit_per_m2)
+  left_join(c_conv %>% select(crop, gC_per_unit_per_m2, kgC_per_unit_per_m2), by = "crop") %>% 
+  mutate(C_exported_gC_m2 = yield * gC_per_unit_per_m2,
+         C_exported_kgC_m2 = yield * kgC_per_unit_per_m2)
 
 # Annual harvest C export (sum of cuts within each field-year)
 harvest_by_year <- harvest_events %>%
   group_by(management, year) %>%
   summarise(
     C_harvested_gC_m2 = sum(C_exported_gC_m2),
+    C_harvested_kgC_m2 = sum(C_exported_kgC_m2),
     harvest_dates     = paste(format(date, "%b %d"), collapse = " + "),
     crops             = paste(unique(crop), collapse = " + "),
     any_date_estimated = any(date_estimated),
@@ -385,10 +407,10 @@ harvest_by_year <- harvest_events %>%
 
 cat("\n--- Harvest C export (gC m⁻²) ---\n")
 print(harvest_by_year %>% select(management, year, crops, C_harvested_gC_m2,
-                                  harvest_dates, any_date_estimated))
+                                 C_harvested_kgC_m2, harvest_dates, any_date_estimated))
 
 # =============================================================================
-# SECTION 6: Unit conversion — µmol CO₂ m⁻² s⁻¹  →  gC m⁻² d⁻¹
+# SECTION 6: Unit conversion — µmol CO₂ m⁻² s⁻¹  →  kgC m⁻² d⁻¹ →  gC m⁻² d⁻¹
 # =============================================================================
 # EC tower fluxes are daily averages in µmol CO₂ m⁻² s⁻¹.
 # To convert to gC m⁻² d⁻¹ (the unit needed for annual accumulation):
@@ -398,12 +420,21 @@ print(harvest_by_year %>% select(management, year, crops, C_harvested_gC_m2,
 #                × 12.011   g C mol⁻¹
 #                × 1×10⁻⁶   mol µmol⁻¹
 #               = µmol m⁻² s⁻¹ × 1.037750
+
+# To convert to kgC m⁻² d⁻¹ 
+#   kgC m⁻² d⁻¹ = µmol CO₂ m⁻² s⁻¹
+#                 × 86,400  s d⁻¹
+#                × 12.011   g C mol⁻¹
+#                × 1×10⁻⁶   mol µmol⁻¹
+#               = µmol m⁻² s⁻¹ × 1.037750
+#               x 0.001 (g to kg) = 0.00103775
 #
 # Applied to both observed columns (NEE, GPP, Reco) AND gap-filled columns
 # (NEE_filled, GPP_filled, Reco_filled). SEs scale by the same factor.
 # Harvest C export table (Section 5) is already in gC m⁻² and unaffected.
 
 UMOL_TO_GC_PER_DAY <- 86400 * 12.011 * 1e-6   # = 1.037750
+UMOL_TO_KGC_PER_DAY <- 86400 * 12.011 * 1e-6 * 0.001 # = 0.00103775
 
 cat("\n--- Raw flux range (µmol CO₂ m⁻² s⁻¹, pre-conversion) ---\n")
 cat("NEE  range:", range(data_cumul$NEE,  na.rm = TRUE), "\n")
@@ -413,22 +444,31 @@ cat("Reco range:", range(data_cumul$Reco, na.rm = TRUE), "\n")
 data_cumul <- data_cumul %>%
   mutate(
     # Convert observed columns (for reference / diagnostics)
-    NEE  = NEE  * UMOL_TO_GC_PER_DAY,
-    GPP  = GPP  * UMOL_TO_GC_PER_DAY,
-    Reco = Reco * UMOL_TO_GC_PER_DAY,
+    NEE_g  = NEE  * UMOL_TO_GC_PER_DAY,
+    GPP_g  = GPP  * UMOL_TO_GC_PER_DAY,
+    Reco_g = Reco * UMOL_TO_GC_PER_DAY,
+    NEE_kg = NEE  * UMOL_TO_KGC_PER_DAY,
+    GPP_kg = GPP  * UMOL_TO_KGC_PER_DAY,
+    Reco_kg = Reco* UMOL_TO_KGC_PER_DAY,
     # Convert gap-filled columns and their SEs
-    NEE_filled  = NEE_filled  * UMOL_TO_GC_PER_DAY,
-    GPP_filled  = GPP_filled  * UMOL_TO_GC_PER_DAY,
-    Reco_filled = Reco_filled * UMOL_TO_GC_PER_DAY,
-    NEE_se      = NEE_se      * UMOL_TO_GC_PER_DAY,
-    GPP_se      = GPP_se      * UMOL_TO_GC_PER_DAY,
-    Reco_se     = Reco_se     * UMOL_TO_GC_PER_DAY
+    NEE_filled_g  = NEE_filled  * UMOL_TO_GC_PER_DAY,
+    GPP_filled_g  = GPP_filled  * UMOL_TO_GC_PER_DAY,
+    Reco_filled_g = Reco_filled * UMOL_TO_GC_PER_DAY,
+    NEE_g_se      = NEE_se      * UMOL_TO_GC_PER_DAY,
+    GPP_g_se      = GPP_se      * UMOL_TO_GC_PER_DAY,
+    Reco_g_se     = Reco_se     * UMOL_TO_GC_PER_DAY,
+    NEE_filled_kg  = NEE_filled  * UMOL_TO_KGC_PER_DAY,
+    GPP_filled_kg  = GPP_filled  * UMOL_TO_KGC_PER_DAY,
+    Reco_filled_kg = Reco_filled * UMOL_TO_KGC_PER_DAY,
+    NEE_kg_se      = NEE_se      * UMOL_TO_KGC_PER_DAY,
+    GPP_kg_se      = GPP_se      * UMOL_TO_KGC_PER_DAY,
+    Reco_kg_se     = Reco_se     * UMOL_TO_KGC_PER_DAY
   )
 
 cat("\n--- Converted flux range (gC m⁻² d⁻¹, post-conversion) ---\n")
-cat("NEE  range:", range(data_cumul$NEE,  na.rm = TRUE), "\n")
-cat("GPP  range:", range(data_cumul$GPP,  na.rm = TRUE), "\n")
-cat("Reco range:", range(data_cumul$Reco, na.rm = TRUE), "\n")
+cat("NEE  range:", range(data_cumul$NEE_g,  na.rm = TRUE), "\n")
+cat("GPP  range:", range(data_cumul$GPP_g,  na.rm = TRUE), "\n")
+cat("Reco range:", range(data_cumul$Reco_g, na.rm = TRUE), "\n")
 
 # =============================================================================
 # SECTION 6b: Partial-year flag
@@ -474,21 +514,34 @@ print(partial_year_flag)
 # observed days as error-free. As a result, uncertainty bounds reflect
 # gap-filling uncertainty only (a conservative lower bound on total uncertainty).
 
-cumul_daily <- data_cumul %>%
+# update, April 2026: use only the 2018 data from Aug. 13, 2018 which is the earliest record we have for org.
+# update 2, April 2026: exclude the 2021 data from main analysis, potentially include in supplemental:
+
+data_cumul_2 <- data_cumul %>% 
+  filter(date >= "2018-08-13") # removed 105 observations from conventional field
+
+cumul_daily <- data_cumul_2 %>%
+  filter(year != 2021) %>% 
   arrange(management, year, doy) %>%
   group_by(management, year) %>%
   mutate(
     # Running cumulative sums
-    cumNEE  = cumsum(replace_na(NEE_filled,  0)),
-    cumGPP  = cumsum(replace_na(GPP_filled,  0)),
-    cumReco = cumsum(replace_na(Reco_filled, 0)),
+    cumNEE_g   = cumsum(replace_na(NEE_filled_g,  0)),
+    cumGPP_g   = cumsum(replace_na(GPP_filled_g,  0)),
+    cumReco_g  = cumsum(replace_na(Reco_filled_g, 0)),
+    cumNEE_kg  = cumsum(replace_na(NEE_filled_kg,  0)),
+    cumGPP_kg  = cumsum(replace_na(GPP_filled_kg,  0)),
+    cumReco_kg = cumsum(replace_na(Reco_filled_kg, 0)),
     # Propagated uncertainty (SE of cumulative sum).
     # replace_na(..., 0) prevents a single NA predictor in one gap row from
     # propagating through cumsum() and wiping out all subsequent SE values.
     # Rows where predict() returned NA (unfillable gaps) contribute 0 variance.
-    cumNEE_se  = sqrt(cumsum(replace_na(NEE_se^2,  0))),
-    cumGPP_se  = sqrt(cumsum(replace_na(GPP_se^2,  0))),
-    cumReco_se = sqrt(cumsum(replace_na(Reco_se^2, 0))),
+    cumNEE_g_se  = sqrt(cumsum(replace_na(NEE_g_se^2,  0))),
+    cumGPP_g_se  = sqrt(cumsum(replace_na(GPP_g_se^2,  0))),
+    cumReco_g_se = sqrt(cumsum(replace_na(Reco_g_se^2, 0))),
+    cumNEE_kg_se  = sqrt(cumsum(replace_na(NEE_kg_se^2,  0))),
+    cumGPP_kg_se  = sqrt(cumsum(replace_na(GPP_kg_se^2,  0))),
+    cumReco_kg_se = sqrt(cumsum(replace_na(Reco_kg_se^2, 0))),
     # Running gap-fill count
     n_days         = row_number(),
     cum_gapfill_NEE  = cumsum(as.integer(NEE_gapfilled)),
@@ -509,12 +562,20 @@ annual_totals <- cumul_daily %>%
     n_gap_GPP       = sum(GPP_gapfilled),
     n_gap_Reco      = sum(Reco_gapfilled),
     pct_gap_NEE     = round(100 * n_gap_NEE  / n_days, 1),
-    NEE_annual      = sum(replace_na(NEE_filled,  0)),
-    GPP_annual      = sum(replace_na(GPP_filled,  0)),
-    Reco_annual     = sum(replace_na(Reco_filled, 0)),
-    NEE_annual_se   = sqrt(sum(NEE_se^2)),
-    GPP_annual_se   = sqrt(sum(GPP_se^2)),
-    Reco_annual_se  = sqrt(sum(Reco_se^2)),
+    # in g:
+    NEE_g_annual      = sum(replace_na(NEE_filled_g,  0)),
+    GPP_g_annual      = sum(replace_na(GPP_filled_g,  0)),
+    Reco_g_annual     = sum(replace_na(Reco_filled_g, 0)),
+    NEE_annual_g_se   = sqrt(sum(replace_na(NEE_g_se^2, 0))), # there are 15 NAs in this row
+    GPP_annual_g_se   = sqrt(sum(GPP_g_se^2)),
+    Reco_annual_g_se  = sqrt(sum(Reco_g_se^2)),
+    # in kg:
+    NEE_kg_annual      = sum(replace_na(NEE_filled_kg,  0)),
+    GPP_kg_annual      = sum(replace_na(GPP_filled_kg,  0)),
+    Reco_kg_annual     = sum(replace_na(Reco_filled_kg, 0)),
+    NEE_annual_kg_se   = sqrt(sum(NEE_kg_se^2)),
+    GPP_annual_kg_se   = sqrt(sum(GPP_kg_se^2)),
+    Reco_annual_kg_se  = sqrt(sum(Reco_kg_se^2)),
     .groups         = "drop"
   )
 
@@ -538,14 +599,14 @@ annual_totals <- cumul_daily %>%
 
 # --- Check 1: sign convention on fully-observed days -------------------------
 obs_days <- data_cumul %>%
-  filter(!is.na(NEE) & !is.na(GPP) & !is.na(Reco)) %>%
+  filter(!is.na(NEE_g) & !is.na(GPP_g) & !is.na(Reco_g)) %>%
   mutate(
-    NEE_implied     = Reco - GPP,   # standard: NEE = Reco - GPP
-    NEE_implied_alt = GPP  - Reco   # alternative sign convention
+    NEE_g_implied     = Reco_g - GPP_g,   # standard: NEE = Reco - GPP
+    NEE_g_implied_alt = GPP_g  - Reco_g   # alternative sign convention
   )
 
-lm_std <- lm(NEE ~ NEE_implied,     data = obs_days)
-lm_alt <- lm(NEE ~ NEE_implied_alt, data = obs_days)
+lm_std <- lm(NEE ~ NEE_g_implied,     data = obs_days)
+lm_alt <- lm(NEE ~ NEE_g_implied_alt, data = obs_days)
 
 rmse <- function(m) round(sqrt(mean(resid(m)^2)), 4)
 
@@ -562,13 +623,13 @@ cat("  Expected: NEE_annual ≈ Reco_annual - GPP_annual  (or GPP - Reco; see Ch
 
 mb_check <- annual_totals %>%
   mutate(
-    implied_NEE_std = Reco_annual - GPP_annual,
-    implied_NEE_alt = GPP_annual  - Reco_annual,
-    closure_std     = round(NEE_annual - implied_NEE_std, 1),
-    closure_alt     = round(NEE_annual - implied_NEE_alt, 1)
+    implied_NEE_std = Reco_g_annual - GPP_g_annual,
+    implied_NEE_alt = GPP_g_annual  - Reco_g_annual,
+    closure_std     = round(NEE_g_annual - implied_NEE_std, 1),
+    closure_alt     = round(NEE_g_annual - implied_NEE_alt, 1)
   ) %>%
   select(management, year, n_days, pct_gap_NEE,
-         NEE_annual, GPP_annual, Reco_annual,
+         NEE_g_annual, GPP_g_annual, Reco_g_annual,
          implied_NEE_std, closure_std,
          implied_NEE_alt, closure_alt)
 
@@ -672,8 +733,8 @@ annual_totals <- annual_totals %>%
             by = c("management", "year")) %>%
   mutate(
     # Add C export; propagate NEE SE only (yield treated as fixed/measured)
-    NECB    = NEE_annual + C_harvested_gC_m2,
-    NECB_se = NEE_annual_se
+    NECB    = NEE_g_annual + C_harvested_gC_m2,
+    NECB_se = NEE_annual_g_se
   )
 
 cat("\n--- Annual flux summary (gC m⁻² [partial yr for 2021]) ---\n")
@@ -683,20 +744,22 @@ cat("Note: 2021 organic ends doy",
     partial_year_flag$last_doy[partial_year_flag$management == "conventional" & partial_year_flag$year == 2021],
     "(Oct 1)\n\n")
 print(annual_totals %>%
-        select(management, year, n_days, partial_year, NEE_annual, GPP_annual,
-               Reco_annual, C_harvested_gC_m2, NECB, pct_gap_NEE, any_date_estimated))
+        select(management, year, n_days, partial_year, NEE_g_annual, GPP_g_annual,
+               Reco_g_annual, C_harvested_gC_m2, NECB, pct_gap_NEE, any_date_estimated))
 
 # =============================================================================
 # SECTION 9: Visualizations
 # =============================================================================
 
 # Colour palette: consistent with main analysis
-mgmt_colors <- c("organic" = "#4DAF4A", "conventional" = "#E6862A")
+mgmt_colors <- c("organic" = "#E69F00", "conventional" = "tomato")
 mgmt_labels <- c("organic" = "Organic (EF01)", "conventional" = "Conventional (EF02)")
 
 # --- 9a: Running cumulative NEE, by year -------------------------------------
 # Harvest event markers (per management): vertical dotted lines
+# update, April 2026: remove 2021 data from main analysis (consider including in supplement)
 harvest_doy_by_year <- harvest_events %>%
+  filter(year != 2021) %>% 
   select(management, year, doy, crop) %>%
   mutate(management = as.character(management))
 
@@ -707,8 +770,8 @@ cat("\n--- Cumulative NEE SE range (max per field-year) ---\n")
 print(
   cumul_daily %>%
     group_by(management, year) %>%
-    summarise(max_cumNEE_se    = round(max(cumNEE_se), 2),
-              ci_95_halfwidth  = round(1.96 * max(cumNEE_se), 2),
+    summarise(max_cumNEE_se    = round(max(cumNEE_g_se), 2),
+              ci_95_halfwidth  = round(1.96 * max(cumNEE_g_se), 2),
               .groups          = "drop")
 )
 # If ci_95_halfwidth < ~15 gC m⁻² the ribbon will be very narrow on this scale.
@@ -717,9 +780,9 @@ print(
 #    <X gC m⁻² at all time points and is not shown."
 
 p_cumNEE <- ggplot(cumul_daily,
-                   aes(x = doy, y = cumNEE, colour = management, fill = management)) +
-  geom_ribbon(aes(ymin = cumNEE - 1.96 * cumNEE_se,
-                  ymax = cumNEE + 1.96 * cumNEE_se),
+                   aes(x = doy, y = cumNEE_g, colour = management, fill = management)) +
+  geom_ribbon(aes(ymin = cumNEE_g - 1.96 * cumNEE_g_se,
+                  ymax = cumNEE_g + 1.96 * cumNEE_g_se),
               alpha = 0.15, colour = NA) +
   geom_line(linewidth = 0.85) +
   geom_hline(yintercept = 0, linetype = "dashed",
@@ -730,16 +793,19 @@ p_cumNEE <- ggplot(cumul_daily,
     linetype = "dotted", linewidth = 0.65, alpha = 0.75,
     inherit.aes = FALSE
   ) +
-  facet_wrap(~ year, nrow = 2, scales = "fixed") +
+  facet_wrap(~ year, 
+             # nrow = 2, 
+             scales = "fixed") +
   scale_colour_manual(values = mgmt_colors, labels = mgmt_labels) +
   scale_fill_manual(values = mgmt_colors, labels = mgmt_labels) +
   labs(
-    title    = "Running cumulative NEE by field and year",
-    subtitle = "Shaded band = 95% CI (gap-filling uncertainty) | Dotted lines = harvest dates",
+    # title    = "Running cumulative NEE by field and year",
+    # subtitle = "Shaded band = 95% CI (gap-filling uncertainty) | Dotted lines = harvest dates",
     x        = "Day of year",
     y        = expression("Cumulative NEE (gC m"^{-2}*")"),
     colour   = NULL, fill = NULL
   ) +
+  ylim(-410, 610) +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom",
         panel.grid.minor = element_blank())
@@ -750,15 +816,15 @@ p_cumNEE <- ggplot(cumul_daily,
 # After each harvest: NECB = cumNEE + cumulative C exported to that point.
 
 cumul_with_harvest <- cumul_daily %>%
-  select(management, year, doy, cumNEE, cumNEE_se) %>%
+  select(management, year, doy, cumNEE_g, cumNEE_g_se) %>%
   left_join(harvest_events %>%
               select(management, year, doy_harvest = doy, C_exported_gC_m2),
             by = c("management", "year"),
             relationship = "many-to-many") %>%
   group_by(management, year, doy) %>%
   summarise(
-    cumNEE     = first(cumNEE),
-    cumNEE_se  = first(cumNEE_se),
+    cumNEE     = first(cumNEE_g),
+    cumNEE_se  = first(cumNEE_g_se),
     cum_C_exp  = sum(C_exported_gC_m2[doy_harvest <= doy], na.rm = TRUE),
     .groups    = "drop"
   ) %>%
@@ -770,7 +836,7 @@ p_cumNECB <- ggplot(cumul_with_harvest,
   geom_ribbon(aes(ymin = cumNECB - 1.96 * cumNEE_se,
                   ymax = cumNECB + 1.96 * cumNEE_se),
               alpha = 0.15, colour = NA) +
-  geom_line(aes(y = cumNEE),  linetype = "solid",  linewidth = 0.8, alpha = 0.5) +
+  geom_line(aes(y = cumNEE),  linetype = "solid",  linewidth = 0.8, alpha = 0.25) +
   geom_line(aes(y = cumNECB), linetype = "solid",  linewidth = 0.8) +
   geom_vline(
     data = harvest_doy_by_year,
@@ -780,16 +846,19 @@ p_cumNECB <- ggplot(cumul_with_harvest,
   ) +
   geom_hline(yintercept = 0, linetype = "dashed",
              colour = "grey50", linewidth = 0.45) +
-  facet_wrap(~ year, nrow = 2, scales = "fixed") +
+  facet_wrap(~ year, 
+             # nrow = 2, 
+             scales = "fixed") +
   scale_colour_manual(values = mgmt_colors, labels = mgmt_labels) +
   scale_fill_manual(values = mgmt_colors, labels = mgmt_labels) +
   labs(
-    title    = "Cumulative NEE vs. NECB by field and year",
-    subtitle = "Faint = NEE only | Bold = NECB (NEE + harvest C export) | Shaded = 95% CI | Dotted = harvest date",
+    # title    = "Cumulative NEE vs. NECB by field and year",
+    # subtitle = "Faint = NEE only | Bold = NECB (NEE + harvest C export) | Shaded = 95% CI | Dotted = harvest date",
     x        = "Day of year",
-    y        = expression("Cumulative flux (gC m"^{-2}*")"),
+    y        = expression("Cumulative NECB (NEE + harvest C) (gC m"^{-2}*")"),
     colour   = NULL, fill = NULL
   ) +
+  ylim(-410, 610) +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom",
         panel.grid.minor = element_blank())
@@ -798,26 +867,28 @@ p_cumNECB <- ggplot(cumul_with_harvest,
 # 2021 bars are hatched (alpha = 0.5) to signal partial-year coverage.
 # A footnote annotation is added instead of overloading the legend.
 p_annual_nee <- ggplot(annual_totals,
-                       aes(x = factor(year), y = NEE_annual, fill = management,
+                       aes(x = factor(year), y = NEE_g_annual, fill = management,
                            alpha = ifelse(partial_year, 0.45, 1.0))) +
   geom_col(position = position_dodge(0.72), width = 0.65, colour = "grey30",
            linewidth = 0.3) +
   geom_errorbar(
-    aes(ymin = NEE_annual - 1.96 * NEE_annual_se,
-        ymax = NEE_annual + 1.96 * NEE_annual_se),
+    aes(ymin = NEE_g_annual - 1.96 * NEE_annual_g_se,
+        ymax = NEE_g_annual + 1.96 * NEE_annual_g_se),
     position = position_dodge(0.72), width = 0.25, linewidth = 0.6, alpha = 1
   ) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
   scale_fill_manual(values = mgmt_colors, labels = mgmt_labels) +
   scale_alpha_identity() +
   labs(
-    title    = "Annual NEE",
-    subtitle = "Faded bars (2021) = partial-year observation (ends at final harvest date)",
+    # title    = "Annual NEE",
+    # subtitle = "Faded bars (2021) = partial-year observation (ends at final harvest date)",
+    subtitle = "Faded bars (2018) = partial-year | Uncertainty from gap-filling SE only",
     x = "Year",
     y = expression("NEE (gC m"^{-2}*")"),
     fill  = NULL
   ) +
-  theme_bw(base_size = 12) +
+  ylim(-250, 610) +
+  theme_bw(base_size = 8) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
 # --- 9d: Annual NECB bar chart -----------------------------------------------
@@ -835,28 +906,30 @@ p_annual_necb <- ggplot(annual_totals,
   scale_fill_manual(values = mgmt_colors, labels = mgmt_labels) +
   scale_alpha_identity() +
   labs(
-    title    = "Annual NECB (NEE + harvest C export)",
-    subtitle = "Faded bars (2021) = partial-year | Uncertainty from gap-filling SE only",
-    x = "Year",
+    # title    = "Annual NECB (NEE + harvest C export)",
+    # subtitle = "Faded bars (2021) = partial-year | Uncertainty from gap-filling SE only",
+    subtitle = "Faded bars (2018) = partial-year | Uncertainty from gap-filling SE only",
+    x = element_blank(),
     y = expression("NECB (gC m"^{-2}*")"),
     fill  = NULL
   ) +
-  theme_bw(base_size = 12) +
-  theme(legend.position = "bottom", panel.grid.minor = element_blank())
+  ylim(-250, 610) +
+  theme_bw(base_size = 8) +
+  theme(legend.position = "none", panel.grid.minor = element_blank())
 
 # --- 9e: Annual GPP and Reco -------------------------------------------------
 annual_gpp_reco <- annual_totals %>%
   select(management, year,
-         GPP_annual, GPP_annual_se,
-         Reco_annual, Reco_annual_se) %>%
+         GPP_g_annual, GPP_annual_g_se,
+         Reco_g_annual, Reco_annual_g_se) %>%
   pivot_longer(
-    cols      = c(GPP_annual, Reco_annual),
+    cols      = c(GPP_g_annual, Reco_g_annual),
     names_to  = "flux",
     values_to = "value"
   ) %>%
   mutate(
-    se   = ifelse(flux == "GPP_annual", GPP_annual_se, Reco_annual_se),
-    flux = recode(flux, "GPP_annual" = "GPP", "Reco_annual" = "Reco")
+    se   = ifelse(flux == "GPP_g_annual", GPP_annual_g_se, Reco_annual_g_se),
+    flux = recode(flux, "GPP_g_annual" = "GPP", "Reco_g_annual" = "Reco")
   )
 
 p_annual_gpp_reco <- ggplot(annual_gpp_reco,
@@ -870,17 +943,129 @@ p_annual_gpp_reco <- ggplot(annual_gpp_reco,
   scale_fill_manual(values = mgmt_colors, labels = mgmt_labels) +
   labs(
     title = "Annual GPP and Ecosystem Respiration",
-    x = "Year",
+    x = element_blank(),
     y = expression("Flux (gC m"^{-2}*" yr"^{-1}*")"),
     fill = NULL
   ) +
   theme_bw(base_size = 12) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
+# --- 9f: Data availability figure --------------------------------------------
+# Calendar-style raster showing data status for every day × field × year.
+# Four categories:
+#   Observed              — tower NEE accepted (no gap-filling applied)
+#   Gap-filled (met OK)   — NEE rejected by QC; met sensors still online;
+#                           GAM gap-filled from tower climate predictors
+#   Gap-filled (ERA5 met) — complete tower outage; ERA5 climate used to
+#                           enable GAM gap-filling
+#   Unfilled              — gap remained after all gap-filling attempts
+#                           (rare; typically first days of year before
+#                           7-day rolling mean is available for Reco)
+#
+# Harvest events are marked as triangles on the lower edge of each year-row.
+# Observation period for partial years (2018, 2021) is visible from where
+# the tiles begin and end.
+
+gap_vis <- data_cumul %>%
+  mutate(
+    # Classify each day into data-status categories
+    status = case_when(
+      !NEE_gapfilled                                      ~ "Observed",
+      # NEE_gapfilled & airt_era5_filled & !is.na(NEE_filled) ~ "Gap-filled (ERA5 met)",
+      # NEE_gapfilled & !airt_era5_filled & !is.na(NEE_filled) ~ "Gap-filled (met OK)",
+      NEE_gapfilled & !is.na(NEE_filled) ~ "Gap-filled",
+      NEE_gapfilled & is.na(NEE_filled)                   ~ "Unfilled",
+      TRUE                                                ~ "Unfilled"
+    ),
+    status = factor(status,
+                    levels = c("Observed",
+                               # "Gap-filled (met OK)",
+                               # "Gap-filled (ERA5 met)",
+                               "Gap-filled",
+                               "Unfilled")),
+    field_label = factor(
+      dplyr::recode(as.character(management),
+                    "organic"      = "Organic",
+                    "conventional" = "Conventional"),
+      levels = c("Conventional", "Organic")
+    ),
+    # Reverse year order so 2018 is at top of each panel
+    year_f = factor(year, levels = rev(sort(unique(year))))
+  )
+
+# Colour palette: accessible, prints legibly in greyscale
+status_colours <- c(
+  "Observed"              = "#2166AC",   # dark blue
+  # "Gap-filled (met OK)"   = "#92C5DE",   # light blue
+  # "Gap-filled (ERA5 met)" = "#F4A582",   # salmon
+  "Gap-filled"            = "#92C5DE",
+  "Unfilled"              = "#CFCFCF"    # light grey
+)
+
+# Harvest events: shown as downward-pointing triangles on the year-strip baseline
+harvest_markers <- harvest_events %>%
+  mutate(
+    field_label = factor(
+      dplyr::recode(as.character(management),
+                    "organic"      = "Organic",
+                    "conventional" = "Conventional"),
+      levels = c("Conventional", "Organic")
+    ),
+    year_f = factor(year, levels = rev(sort(unique(data_cumul$year))))
+  )
+
+p_data_avail <- ggplot(gap_vis,
+                       aes(x = doy, y = year_f, fill = status)) +
+  geom_tile(height = 0.85, linewidth = 0) +
+  # # Harvest triangles just below each year strip
+  # geom_point(
+  #   data = harvest_markers,
+  #   aes(x = doy, y = year_f, shape = "Harvest"),
+  #   inherit.aes = FALSE,
+  #   colour = "grey20", size = 2, stroke = 0.4,
+  #   position = position_nudge(y = -0.48)
+  # ) +
+  scale_fill_manual(values = status_colours,
+                    name   = "Data status") +
+  # scale_shape_manual(values = c("Harvest" = 25),   # filled downward triangle
+  #                    name   = NULL) +
+  scale_x_continuous(
+    breaks = c(1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335),
+    labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+    expand = c(0, 0)
+  ) +
+  scale_y_discrete(expand = expansion(add = 0.6)) +
+  facet_wrap(~ field_label, ncol = 1) +
+  labs(
+    title   = "NEE data availability by field and year",
+    x       = NULL,
+    y       = element_blank()
+  ) +
+  guides(
+    fill  = guide_legend(order = 1, nrow = 2,
+                         override.aes = list(size = 4, height = 0.7)),
+    shape = guide_legend(order = 2,
+                         override.aes = list(size = 3, colour = "grey20",
+                                             fill  = "grey20"))
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position   = "bottom",
+    # legend.box        = "vertical",
+    legend.margin     = margin(t = 1),
+    panel.grid        = element_blank(),
+    strip.text        = element_text(face = "bold", size = 11),
+    axis.ticks.x      = element_blank()
+  ) +
+  guides(fill = guide_legend(nrow = 1))
+
+print(p_data_avail)
+
 # --- Render all plots --------------------------------------------------------
 print(p_cumNEE)
 print(p_cumNECB)
-print(p_annual_nee + p_annual_necb)    # side by side via patchwork
+print(p_annual_nee + p_annual_necb)   # side by side via patchwork
 print(p_annual_gpp_reco)
 
 # =============================================================================
@@ -937,25 +1122,85 @@ table_data <- annual_totals %>%
   mutate(
     # Field label
     Field = dplyr::recode(as.character(management),
-                          "organic"       = "Organic (EF01)",
-                          "conventional"  = "Conventional (EF02)"),
+                          "organic"       = "Organic",
+                          "conventional"  = "Conventional"),
     # Year with dagger for partial years
     Year  = if_else(partial_year,
                     paste0(year, "\u2020"),   # †
                     as.character(year)),
     # Formatted NEE and NECB
-    NEE_fmt  = sprintf("%.0f \u00b1 %.0f", NEE_annual, 1.96 * NEE_annual_se),
+    NEE_fmt  = sprintf("%.0f \u00b1 %.0f", NEE_g_annual, 1.96 * NEE_annual_g_se),
     NECB_fmt = sprintf("%.0f \u00b1 %.0f", NECB,       1.96 * NECB_se),
     C_exp    = sprintf("%.0f", C_harvested_gC_m2),
     Gap      = sprintf("%.0f", pct_gap_NEE),
     Days     = as.character(n_days),
-    Balance  = designate_balance(NEE_annual)
+    Balance  = designate_balance(NEE_g_annual)
   ) %>%
   arrange(Field, year) %>%
   select(
-    Field, Year, Crop = crops, Period = period, Days, `Gap (%)` = Gap,
+    Field, Year, Crop = crops, 
+    # Period = period, 
+    Days, `Gap-filled (%)` = Gap,
     `NEE` = NEE_fmt, `Harvest C` = C_exp, `NECB` = NECB_fmt,
     `C balance` = Balance
+  )
+
+table_data_NEEonly <- annual_totals %>%
+  left_join(obs_period, by = c("management", "year")) %>%
+  mutate(
+    # Field label
+    Field = dplyr::recode(as.character(management),
+                          "organic"       = "Organic",
+                          "conventional"  = "Conventional"),
+    # Year with dagger for partial years
+    Year  = if_else(partial_year,
+                    paste0(year, "\u2020"),   # †
+                    as.character(year)),
+    # Formatted NEE and NECB
+    NEE_fmt  = sprintf("%.0f \u00b1 %.0f", NEE_g_annual, 1.96 * NEE_annual_g_se),
+    # NECB_fmt = sprintf("%.0f \u00b1 %.0f", NECB,       1.96 * NECB_se),
+    # C_exp    = sprintf("%.0f", C_harvested_gC_m2),
+    Gap      = sprintf("%.0f", pct_gap_NEE),
+    Days     = as.character(n_days),
+    Balance  = designate_balance(NEE_g_annual)
+  ) %>%
+  arrange(Field, year) %>%
+  select(
+    Field, Year, Crop = crops, 
+    # Period = period, 
+    Days, `Gap-filled (%)` = Gap,
+    `NEE` = NEE_fmt, 
+    # `Harvest C` = C_exp, 
+    # `NECB` = NECB_fmt,
+    `C balance` = Balance
+  )
+
+table_data_with_NECB <- annual_totals %>%
+  left_join(obs_period, by = c("management", "year")) %>%
+  mutate(
+    # Field label
+    Field = dplyr::recode(as.character(management),
+                          "organic"       = "Organic",
+                          "conventional"  = "Conventional"),
+    # Year with dagger for partial years
+    Year  = if_else(partial_year,
+                    paste0(year, "\u2020"),   # †
+                    as.character(year)),
+    # Formatted NEE and NECB
+    NEE_fmt  = sprintf("%.0f \u00b1 %.0f", NEE_g_annual, 1.96 * NEE_annual_g_se),
+    NECB_fmt = sprintf("%.0f \u00b1 %.0f", NECB,       1.96 * NECB_se),
+    C_exp    = sprintf("%.0f", C_harvested_gC_m2),
+    Gap      = sprintf("%.0f", pct_gap_NEE),
+    Days     = as.character(n_days),
+    Balance  = designate_balance(NECB)
+  ) %>%
+  arrange(Field, year) %>%
+  select(
+    Field, Year, Crop = crops, 
+    # Period = period, 
+    Days, `Gap-filled (%)` = Gap,
+    `NEE` = NEE_fmt, `Harvest C` = C_exp, `NECB` = NECB_fmt,
+    `C balance with export` = Balance
   )
 
 # Print plain version to console
@@ -972,9 +1217,9 @@ ft <- flextable(table_data) %>%
     Field      = "Field",
     Year       = "Year",
     Crop       = "Crop",
-    Period     = "Observation period",
+    # Period     = "Observation period",
     Days       = "Days",
-    `Gap (%)`  = "Gap (%)",
+    `Gap-filled (%)`  = "Gap-filled (%)",
     NEE        = "NEE\n(gC m\u207b\u00b2)",
     `Harvest C`= "Harvest C\n(gC m\u207b\u00b2)",
     NECB       = "NECB\n(gC m\u207b\u00b2)",
@@ -986,9 +1231,11 @@ ft <- flextable(table_data) %>%
   valign(j = "Field", valign = "top") %>%
 
   # Right-align numeric columns, left-align text
-  align(j = c("NEE", "Harvest C", "NECB", "Days", "Gap (%)"),
+  align(j = c("NEE", "Harvest C", "NECB", "Days", "Gap-filled (%)"),
         align = "right", part = "all") %>%
-  align(j = c("Field", "Year", "Crop", "Period", "C balance"),
+  align(j = c("Field", "Year", "Crop", 
+              # "Period", 
+              "C balance"),
         align = "left", part = "all") %>%
 
   # Colour-code C balance column
@@ -999,15 +1246,19 @@ ft <- flextable(table_data) %>%
   bold(i = ~ `C balance` == "Source", j = "C balance") %>%
 
   # Light shading for partial-year rows
-  bg(i = ~ grepl("\u2020", Year), bg = "#F5F5F5") %>%
+  # bg(i = ~ grepl("\u2018", Year), bg = "#F5F5F5") %>%
+  
+  # light shading for each management:
+  bg(i = ~ grepl("Conventional", Field), bg = "#ffe5e1") %>% 
+  bg(i = ~ grepl("Organic", Field), bg = "#fff0ce") %>% 
 
   # Column widths (inches, for Word)
   width(j = "Field",       width = 1.4) %>%
   width(j = "Year",        width = 0.45) %>%
   width(j = "Crop",        width = 1.3) %>%
-  width(j = "Period",      width = 1.1) %>%
+  # width(j = "Period",      width = 1.1) %>%
   width(j = "Days",        width = 0.4) %>%
-  width(j = "Gap (%)",     width = 0.5) %>%
+  width(j = "Gap-filled (%)",     width = 0.5) %>%
   width(j = "NEE",         width = 0.95) %>%
   width(j = "Harvest C",   width = 0.85) %>%
   width(j = "NECB",        width = 0.95) %>%
@@ -1015,12 +1266,12 @@ ft <- flextable(table_data) %>%
 
   # Borders
   border_outer(part = "all",    border = officer::fp_border(width = 1.2)) %>%
-  border_inner_h(part = "body", border = officer::fp_border(width = 0.4,
+  border_inner_h(part = "body", border = officer::fp_border(width = 2,
                                                              color = "grey70")) %>%
   hline(part = "header",        border = officer::fp_border(width = 1.2)) %>%
 
   # Font
-  font(fontname = "Times New Roman", part = "all") %>%
+  # font(family = "serif") %>%
   fontsize(size = 10, part = "body") %>%
   fontsize(size = 10, part = "header") %>%
   bold(part = "header") %>%
@@ -1028,7 +1279,7 @@ ft <- flextable(table_data) %>%
   # Footnote
   add_footer_lines(paste0(
     "\u2020 Partial-year observations: 2018 data begins after tower installation; ",
-    "2021 data ends at final harvest date (organic: 10 Aug; conventional: 1 Oct). ",
+    # "2021 data ends at final harvest date (organic: 10 Aug; conventional: 1 Oct). ",
     "Sink = net carbon uptake (NEE < \u221220 gC m\u207b\u00b2); ",
     "Source = net carbon loss (NEE > +20 gC m\u207b\u00b2); ",
     "Near-neutral = |\u200bNEE\u200b| \u2264 20 gC m\u207b\u00b2. ",
@@ -1042,15 +1293,179 @@ ft <- flextable(table_data) %>%
 
   set_table_properties(layout = "autofit")
 
-print(ft)
+# Define the text format with "Times New Roman"
+# text_format_times <- fp_text(font.family = "Times New Roman", font.size = 10)
+
+# Apply the font to the entire table
+# ft <- style(ft, pr_t = text_format_times, part = "all")
+ft
+
+# NEE only: 
+ft2 <- flextable(table_data_NEEonly) %>%
+  
+  # Header labels
+  set_header_labels(
+    Field      = "Field",
+    Year       = "Year",
+    Crop       = "Crop",
+    # Period     = "Observation period",
+    Days       = "Days",
+    `Gap-filled (%)`  = "Gap-filled (%)",
+    NEE        = "NEE\n(gC m\u207b\u00b2)",
+    # `Harvest C`= "Harvest C\n(gC m\u207b\u00b2)",
+    # NECB       = "NECB\n(gC m\u207b\u00b2)",
+    `C balance`= "C balance"
+  ) %>%
+  
+  # Merge repeated Field cells (organic / conventional grouping)
+  merge_v(j = "Field") %>%
+  valign(j = "Field", valign = "top") %>%
+  
+  # Right-align numeric columns, left-align text
+  align(j = c("NEE", "Days", "Gap-filled (%)"),
+        align = "right", part = "all") %>%
+  align(j = c("Field", "Year", "Crop", "C balance"),
+        align = "left", part = "all") %>%
+  
+  # Colour-code C balance column
+  color(i = ~ `C balance` == "Sink",         j = "C balance", color = "#2E7D32") %>%
+  color(i = ~ `C balance` == "Source",       j = "C balance", color = "#C62828") %>%
+  color(i = ~ `C balance` == "Near-neutral", j = "C balance", color = "#757575") %>%
+  bold(i = ~ `C balance` == "Sink",   j = "C balance") %>%
+  bold(i = ~ `C balance` == "Source", j = "C balance") %>%
+  
+  # Light shading for partial-year rows
+  # bg(i = ~ grepl("\u2020", Year), bg = "#F5F5F5") %>%
+  
+  # light shading for each management:
+  bg(i = ~ grepl("Conventional", Field), bg = "#ffe5e1") %>% 
+  bg(i = ~ grepl("Organic", Field), bg = "#fff0ce") %>% 
+  
+  # Column widths (inches, for Word)
+  width(j = "Field",       width = 1.4) %>%
+  width(j = "Year",        width = 0.45) %>%
+  width(j = "Crop",        width = 1.3) %>%
+  # width(j = "Period",      width = 1.1) %>%
+  width(j = "Days",        width = 0.4) %>%
+  width(j = "Gap-filled (%)",     width = 0.5) %>%
+  width(j = "NEE",         width = 0.95) %>%
+  # width(j = "Harvest C",   width = 0.85) %>%
+  # width(j = "NECB",        width = 0.95) %>%
+  width(j = "C balance",   width = 0.85) %>%
+  
+  # Borders
+  border_outer(part = "all",    border = officer::fp_border(width = 1.2)) %>%
+  border_inner_h(part = "body", border = officer::fp_border(width = 0.4,
+                                                            color = "grey70")) %>%
+  hline(part = "header",        border = officer::fp_border(width = 1.2)) %>%
+  
+  # Font
+  # font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "body") %>%
+  fontsize(size = 10, part = "header") %>%
+  bold(part = "header") %>%
+  
+  # Footnote
+  add_footer_lines(paste0(
+    "\u2020 Partial-year observations: 2018 data begins after tower installation; ",
+    # "2021 data ends at final harvest date (organic: 10 Aug; conventional: 1 Oct). ",
+    "Sink = net carbon uptake (NEE < \u221220 gC m\u207b\u00b2); ",
+    "Source = net carbon loss (NEE > +20 gC m\u207b\u00b2); ",
+    "Near-neutral = |\u200bNEE\u200b| \u2264 20 gC m\u207b\u00b2. ",
+    "Uncertainty = \u00b11.96 \u00d7 propagated gap-filling prediction SE. ",
+    "NEE sign convention: negative = net carbon sink."
+  )) %>%
+  fontsize(size = 8, part = "footer") %>%
+  italic(part = "footer") %>%
+  color(part = "footer", color = "grey30") %>%
+  
+  set_table_properties(layout = "autofit")
+
+print(ft2)
+
+# with NECB: 
+ft3 <- flextable(table_data_with_NECB) %>%
+  
+  # Header labels
+  set_header_labels(
+    Field      = "Field",
+    Year       = "Year",
+    Crop       = "Crop",
+    Period     = "Observation period",
+    Days       = "Days",
+    `Gap-filled (%)`  = "Gap-filled (%)",
+    NEE        = "NEE\n(gC m\u207b\u00b2)",
+    `Harvest C`= "Harvest C\n(gC m\u207b\u00b2)",
+    NECB       = "NECB\n(gC m\u207b\u00b2)",
+    `C balance with export`= "C balance with export"
+  ) %>%
+  
+  # Merge repeated Field cells (organic / conventional grouping)
+  merge_v(j = "Field") %>%
+  valign(j = "Field", valign = "top") %>%
+  
+  # Right-align numeric columns, left-align text
+  align(j = c("NEE", "Harvest C", "NECB", "Days", "Gap-filled (%)"),
+        align = "right", part = "all") %>%
+  align(j = c("Field", "Year", "Crop", "Period", "C balance with export"),
+        align = "left", part = "all") %>%
+  
+  # Colour-code C balance column
+  color(i = ~ `C balance with export` == "Sink",         j = "C balance with export", color = "#2E7D32") %>%
+  color(i = ~ `C balance with export` == "Source",       j = "C balance with export", color = "#C62828") %>%
+  color(i = ~ `C balance with export` == "Near-neutral", j = "C balance with export", color = "#757575") %>%
+  bold(i = ~ `C balance with export` == "Sink",   j = "C balance with export") %>%
+  bold(i = ~ `C balance with export` == "Source", j = "C balance with export") %>%
+  
+  # Light shading for partial-year rows
+  bg(i = ~ grepl("\u2020", Year), bg = "#F5F5F5") %>%
+  
+  # Column widths (inches, for Word)
+  width(j = "Field",       width = 1.4) %>%
+  width(j = "Year",        width = 0.45) %>%
+  width(j = "Crop",        width = 1.3) %>%
+  width(j = "Period",      width = 1.1) %>%
+  width(j = "Days",        width = 0.4) %>%
+  width(j = "Gap-filled (%)",     width = 0.5) %>%
+  width(j = "NEE",         width = 0.95) %>%
+  width(j = "Harvest C",   width = 0.85) %>%
+  width(j = "NECB",        width = 0.95) %>%
+  width(j = "C balance with export",   width = 0.85) %>%
+  
+  # Borders
+  border_outer(part = "all",    border = officer::fp_border(width = 1.2)) %>%
+  border_inner_h(part = "body", border = officer::fp_border(width = 0.4,
+                                                            color = "grey70")) %>%
+  hline(part = "header",        border = officer::fp_border(width = 1.2)) %>%
+  
+  # Font
+  # font(fontname = "Times New Roman", part = "all") %>%
+  fontsize(size = 10, part = "body") %>%
+  fontsize(size = 10, part = "header") %>%
+  bold(part = "header") %>%
+  
+  # Footnote
+  add_footer_lines(paste0(
+    "Sink, integrating harvest = net carbon uptake (NECB < \u221220 gC m\u207b\u00b2); ",
+    "Source, integrating harvest = net carbon loss (NECB > +20 gC m\u207b\u00b2); ",
+    "Near-neutral = |\u200bNEE\u200b| \u2264 20 gC m\u207b\u00b2. ",
+    "Uncertainty = \u00b11.96 \u00d7 propagated gap-filling prediction SE. "
+  )) %>%
+  fontsize(size = 8, part = "footer") %>%
+  italic(part = "footer") %>%
+  color(part = "footer", color = "grey30") %>%
+  
+  set_table_properties(layout = "autofit")
+
+print(ft3)
 
 # --- Export to Word ----------------------------------------------------------
-doc <- officer::read_docx() %>%
-  officer::body_add_par("Table 1. Annual carbon balance summary for organic (EF01) and conventional (EF02) fields, 2018\u20132021.",
-                         style = "Normal") %>%
-  officer::body_add_par("", style = "Normal") %>%   # spacer
-  flextable::body_add_flextable(ft)
-
-output_path <- here::here("R scripts", "annual_carbon_balance_table.docx")
-print(doc, target = output_path)
-cat("\nTable exported to:", output_path, "\n")
+# doc <- officer::read_docx() %>%
+#   officer::body_add_par("Table 1. Annual carbon balance summary for organic (EF01) and conventional (EF02) fields, 2018\u20132021.",
+#                          style = "Normal") %>%
+#   officer::body_add_par("", style = "Normal") %>%   # spacer
+#   flextable::body_add_flextable(ft)
+# 
+# output_path <- here::here("R scripts", "annual_carbon_balance_table.docx")
+# print(doc, target = output_path)
+# cat("\nTable exported to:", output_path, "\n")

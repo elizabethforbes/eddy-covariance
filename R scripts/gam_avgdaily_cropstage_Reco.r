@@ -349,6 +349,16 @@ coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # unexpected deviations in Reco have moderate influence on current Reco value; short term environmental
 # disturbances will affect it but impact will fade pretty fast
 
+# calculate a pseudo R2 for this model since R2 is not useful here as it reflects two different
+# correlation structures (lm and gam) PLUS the corARMA structure makes it impossible to 
+# account for autocorrelation in predicted values
+
+library(DescTools)
+# use CCC (concordance correlation coefficient) bc it's not possible to calculate R2
+CCC(obs, fits_lme)$rho.c
+#    est    lwr.ci    upr.ci
+# 0.6307068 0.5946755 0.6642096
+
 # -----------------------------------------------------------------------------
 # Summary tables: Reco (gamm model with corARMA structure and smoothed climate)
 # -----------------------------------------------------------------------------
@@ -461,22 +471,46 @@ tbl_reco_smooths
 # Visualizations
 # -----------------------------------------------------------------------------
 
-source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+# source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+# source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+source(here::here("R scripts", "plot_databymanagement.r"))
+source(here::here("R scripts", "plot_te_difference.r"))
+
 
 # Main finding figure ---------------------------------------------------------
-r1 <- plot_coef_plot(gamm_Reco_smoothed$gam, flux_var = "Reco")
+# g1 <- plot_coef_plot(bam_GPP, flux_var = "GPP")
+
+# Main finding figure ---------------------------------------------------------
+# r1 <- plot_coef_plot(gamm_Reco_smoothed$gam, flux_var = "Reco")
 
 # Raw observed means, by management x stage — no climate correction -----------
 r2 <- plot_management_comparison(data1, flux_var = "Reco")
+r2 + labs( 
+  y = (bquote(respiration ~ "(µmol" ~ CO[2] ~ m^-2 ~ s^-1 ~ ")")),
+  title = "Respiration by Management and Crop Stage")
+
+# difference plot for te() surface: effects of climate on VARIABLE as indicated
+# by the difference in organic - conventional
+r_te <- plot_te_difference(
+  model           = gamm_Reco_smoothed,
+  data            = data1,
+  flux_var        = "R[eco]",
+  temp_var        = "air_temperature_7",
+  climate_var     = "VPD_7",
+  better_direction = "neutral",
+  layout          = "temp_vpd"
+)
+r_te
+
 
 # Predicted by stage ------------------------------------------------------
-r3 <- plot_predicted_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
+# r3 <- plot_predicted_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
 # corrected for climate (VPD and air temperature)
 
 # Plot the te() surface: effects of VPD*temperature on NEE across management --
-r4 <- plot_te_surface(gamm_Reco_smoothed$gam,
-                      temp_var = "air_temperature_7", vpd_var = "VPD_7",
-                      data1, flux_var = "Reco")
+# r4 <- plot_te_surface(gamm_Reco_smoothed$gam,
+                      # temp_var = "air_temperature_7", vpd_var = "VPD_7",
+                      # data1, flux_var = "Reco")
 # organic maintains higher atmospheric fixation through primary productivity
 # in hot, dry conditions, more so than the conventional field. Its atmospheric 
 # fixation potential is much higher at cold, humid levels than conventional; probably
@@ -484,8 +518,19 @@ r4 <- plot_te_surface(gamm_Reco_smoothed$gam,
 # (temp > 20C, VPD < 1000) the organic field maintains a positive productivity level
 # while the conventional field is non-productive.
 
+# # add corner labels:
+# r4 + 
+#   annotate("label", x = -4, y = .25,  label = "cool & humid air\n(low demand)",
+#               color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = 20,  y = .25,  label = "warm & humid air\n(productive)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = -4, y = 1.3, label = "cool & dry air\n(uncommon)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
+#   annotate("label", x = 20,  y = 1.3, label = "hot & dry air\n(drought stress)",
+#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75))
+
 # -- Model performance --------------------------------------------------------
-r5 <- plot_gam_observed_vs_predicted(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
+# r5 <- plot_gam_observed_vs_predicted(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
 
 # Residuals by crop stage: check for systematic stage-level bias
-r6 <- plot_gam_residuals_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
+# r6 <- plot_gam_residuals_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")

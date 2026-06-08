@@ -1,0 +1,8 @@
+term,term_raw,Estimate,SE,t,p,sig
+Intercept,(Intercept),3.491,1.119,3.12,0.002,**
+Organic,managementorganic,-0.738,1.696,-0.435,0.664,
+Fallow,crop_stage_simplefallow,-1.63,0.696,-2.343,0.019,*
+Grain fill,crop_stage_simplegrain_fill,3.253,0.812,4.009,0,***
+Reproductive,crop_stage_simplereproductive,4.139,1.029,4.024,0,***
+Organic × Grain fill,managementorganic:crop_stage_simplegrain_fill,-3.982,1.189,-3.35,0.001,***
+Organic × Reproductive,managementorganic:crop_stage_simplereproductive,-2.692,1.539,-1.749,0.081,.

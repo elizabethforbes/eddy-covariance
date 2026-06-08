@@ -108,26 +108,50 @@ df <- df %>%
          )
 
 # Classify growth phase
-df$growth_phase <- with(df, ifelse(days_since_harvest < 0, "Pre-Harvest",
-                                   ifelse(days_since_harvest < 14 & cumulative_gdd < 100, "Establishment",
-                                          ifelse(days_since_harvest >= 14 & cumulative_gdd >= 100 & soil_temp_7d_smooth >= 15, "Vegetative Growth",
+df$growth_phase_a <- with(df, ifelse(days_since_harvest < 0, "Pre-Harvest",
+                                   ifelse(days_since_harvest < 14 & cumulative_gdd_a < 100, "Establishment",
+                                          ifelse(days_since_harvest >= 14 & cumulative_gdd_a >= 100 & soil_temp_7d_smooth >= 15, "Vegetative Growth",
                                                  "Transition / Uncertain"))))
+df$growth_phase_o <- with(df, ifelse(days_since_harvest < 0, "Pre-Harvest",
+                                     ifelse(days_since_harvest < 14 & cumulative_gdd_o < 100, "Establishment",
+                                            ifelse(days_since_harvest >= 14 & cumulative_gdd_o >= 100 & soil_temp_7d_smooth >= 15, "Vegetative Growth",
+                                                   "Transition / Uncertain"))))
 
 # View results
-print(df[, c("date", "days_since_harvest", "daily_gdd", "cumulative_gdd_a", 
-             "cumulative_gdd_o", "soil_temp_7d_smooth", "growth_phase")])
+print(df[, c("date", "days_since_harvest", "daily_gdd_a", "daily_gdd_o", "cumulative_gdd_a", 
+             "cumulative_gdd_o", "soil_temp_7d_smooth", "growth_phase_a", "growth_phase_o")])
 
-# Plot cumulative GDD with growth phases shaded
+# Plot cumulative GDD with growth phases shaded (alfalfa)
 ggplot(df, aes(x = date)) +
-  geom_line(aes(y = cumulative_gdd), color = "blue", size = 1) +
+  geom_line(aes(y = cumulative_gdd_a), color = "blue", size = 1) +
   geom_hline(yintercept = 100, linetype = "dashed", color = "gray") +
-  geom_rect(data = subset(df, growth_phase == "Pre-Harvest"),
+  geom_rect(data = subset(df, growth_phase_a == "Pre-Harvest"),
             aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
             fill = "lightgray", alpha = 0.3) +
-  geom_rect(data = subset(df, growth_phase == "Establishment"),
+  geom_rect(data = subset(df, growth_phase_a == "Establishment"),
             aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
             fill = "orange", alpha = 0.3) +
-  geom_rect(data = subset(df, growth_phase == "Vegetative Growth"),
+  geom_rect(data = subset(df, growth_phase_a == "Vegetative Growth"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "lightgreen", alpha = 0.3) +
+  labs(title = "Cumulative GDD and Cover Crop Growth Phases",
+       y = "Cumulative GDD (°C-days)",
+       x = "Date") +
+  theme_minimal() +
+  scale_x_date(date_breaks = "1 week", date_labels = "%b %d") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Plot cumulative GDD with growth phases shaded (orchardgrass)
+ggplot(df, aes(x = date)) +
+  geom_line(aes(y = cumulative_gdd_o), color = "blue", size = 1) +
+  geom_hline(yintercept = 100, linetype = "dashed", color = "gray") +
+  geom_rect(data = subset(df, growth_phase_o == "Pre-Harvest"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "lightgray", alpha = 0.3) +
+  geom_rect(data = subset(df, growth_phase_o == "Establishment"),
+            aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
+            fill = "orange", alpha = 0.3) +
+  geom_rect(data = subset(df, growth_phase_o == "Vegetative Growth"),
             aes(xmin = date - 0.5, xmax = date + 0.5, ymin = -Inf, ymax = Inf),
             fill = "lightgreen", alpha = 0.3) +
   labs(title = "Cumulative GDD and Cover Crop Growth Phases",

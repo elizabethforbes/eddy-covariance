@@ -1,0 +1,8 @@
+term,term_raw,EDF,Ref.df,F,p,sig
+s(year f) × conventional,s(year_f):as.factor(management)conventional,0,3,0,0.972,
+s(year f) × organic,s(year_f):as.factor(management)organic,0,3,0,0.633,
+s(doy),s(doy),7.439,18,30.95,0,***
+"te(air temperature 7,VPD 7) × conventional","te(air_temperature_7,VPD_7):as.factor(management)conventional",3.001,3.001,5.132,0.002,**
+"te(air temperature 7,VPD 7) × organic","te(air_temperature_7,VPD_7):as.factor(management)organic",20.882,20.882,5.87,0,***
+s(days since tillage) × conventional,s(days_since_tillage):as.factor(management)conventional,1,1,0.004,0.952,
+s(days since tillage) × organic,s(days_since_tillage):as.factor(management)organic,2.446,2.446,3.512,0.022,*

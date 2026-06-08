@@ -34,11 +34,11 @@ library(gratia)
 library(DHARMa)
 
 # make sure management is in factor form
-ec_daily_mngmnt$management <- factor(as.character(ec_daily_mngmnt$management))
+ec_daily_mngmnt3$management <- factor(as.character(ec_daily_mngmnt3$management))
 # same for crop stage:
-ec_daily_mngmnt$crop_stage_simple <- factor(ec_daily_mngmnt$crop_stage_simple)
+ec_daily_mngmnt3$crop_stage_simple <- factor(ec_daily_mngmnt3$crop_stage_simple)
 # set reference level crop stage as "mature":
-ec_daily_mngmnt$crop_stage_simple <- relevel(ec_daily_mngmnt$crop_stage_simple, ref = "mature")
+ec_daily_mngmnt3$crop_stage_simple <- relevel(ec_daily_mngmnt3$crop_stage_simple, ref = "mature")
 
 # -----------------------------------------------------------------------------
 # Mechanisms of difference in fluxes: matched data across 2018-2020
@@ -49,10 +49,10 @@ ec_daily_mngmnt$crop_stage_simple <- relevel(ec_daily_mngmnt$crop_stage_simple, 
 # daily fluxes by management. The question: how do the systems respond differently to climate drivers?
 # this question is better answered by temporally and biophysically-matched datasets.
 
-data1 <- ec_daily_mngmnt %>%
+data1 <- ec_daily_mngmnt3 %>%
   filter(year == 2018 | year == 2019 | year == 2020) # restrict years to 2018, 2019, and 2020
-data1 <- data1 %>% 
-  filter(is.na(current_crop) | current_crop != "alfalfa hay")
+# data1 <- data1 %>% 
+#   filter(is.na(current_crop) | current_crop != "alfalfa hay")
 
 # Note: rather than use NDVI or some other indicator of crop development (esp
 # across different crops), crop_stage_simple is used as a categorical predictor.
@@ -150,23 +150,17 @@ gam_NEE_tensor2_ml <- update(gam_NEE_tensor2, method = "ML")
 
 AIC(gam_NEE_additive_ml, gam_NEE_tensor_ml, gam_NEE_tensor2_ml)
 #                         df      AIC
-# gam_NEE_additive_ml 50.60716 4302.153
-# gam_NEE_tensor_ml   58.42811 4269.127
-# gam_NEE_tensor2_ml  59.79631 4266.508 # best fit -- selected model
+# gam_NEE_additive_ml 51.21994 4720.453
+# gam_NEE_tensor_ml   58.42811 4269.127 # this model has the best AIC, but need to check concurvity of interaction terms
+# gam_NEE_tensor2_ml  61.42126 4671.896
 
-# Likelihood ratio test: tensor2 (te) significantly better than tensor (ti)
-anova(gam_NEE_tensor, gam_NEE_tensor2)
-# Resid. Df Resid. Dev     Df Deviance      F Pr(>F)
-# 1    959.72     3403.8                              
-# 2    953.99     3384.7 5.7362   19.075 0.9531 0.4536 # not significantly better fit, however
-
-# check concurvity of ti() model:
-concurvity(gam_NEE_tensor, full = TRUE)
+# check concurvity of ti() model: basically, can one smooth term be approximated by a combination of the other smooths in the model?
+concurvity(gam_NEE_tensor2, full = TRUE)
 # Concurvity check: ti() model rejected in favour of te()
 # Air temperature and VPD show high concurvity in the decomposed ti() model
-# (observed > 0.97 for marginal smooths), consistent with their strong
+# (observed > 0.96 for marginal smooths), consistent with their strong
 # covariance in the Hudson Valley. Marginal effects are not independently
-# identifiable; joint effect modelled with te() instead.
+# identifiable; joint effect should be modeled with te() instead.
 
 # Summary and diagnostics (gam_NEE with full tensor interaction — pre-autocorrelation correction)
 summary(gam_NEE_tensor2)
@@ -195,8 +189,9 @@ gamm_NEE <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_NEE$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.4123879  
-# interpret: 41% of today's residual is carried into the next day's. Previous (gam()) model was underestimating SE without autocorrelation accounting.
+# 0.4105307  
+# interpret: 41% of today's residual is carried into the next day's. 
+# Previous (gam()) model was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_NEE$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
 # lag is absorbed, indicating better model fit
 
@@ -371,43 +366,40 @@ appraise(bam_NEE)
 # DHARMa residuals: tests for overdispersion, uniformity, outliers
 simulationOutput <- DHARMa::simulateResiduals(bam_NEE, n = 500)
 plot(simulationOutput)
+# some issues here: indications of heteroscedasticity
+
+gam.check(bam_NEE)
+# however, the histogram is clean as are the response vs. fitted values.
+# the distribution of residuals is very peaked, but that's ok; and, 
+# the model converged quickly (10 iterations) and the k checks indicate good
+# (aka not overfitting) the smooths, and the te() terms are only using 14 of 63 EDFs
+# (aka, also not overfitting)
 
 # -----------------------------------------------------------------------------
 # Visualizations
 # -----------------------------------------------------------------------------
 
-source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+# source(here::here("R scripts", "gam_NEE_vizfunctions.r"))
+source(here::here("R scripts", "plot_databymanagement.r"))
+source(here::here("R scripts", "plot_te_difference.r"))
 
 # Main finding figure ---------------------------------------------------------
-p1 <- plot_coef_plot(bam_NEE, flux_var = "NEE")
+# p1 <- plot_coef_plot(bam_NEE, flux_var = "NEE")
+# p1
 
 # Raw observed means, by management x stage — no climate correction -----------
 p2 <- plot_management_comparison(data1, flux_var = "NEE")
+p2 + coord_cartesian(ylim = c(-10, 10))    # before saving / returning
 
-# Predicted NEE by stage ------------------------------------------------------
-p3 <- plot_predicted_by_stage(bam_NEE, data1, flux_var = "NEE")
-# corrected for climate (VPD and air temperature)
-
-# Plot the te() surface: effects of VPD*temperature on NEE across management --
-p4 <- plot_te_surface(bam_NEE, data1, flux_var = "NEE")
-# organic maintains high sink potential at hot, dry conditions, while the 
-# conventional field becomes a source; this indicates some climate resilience
-# on the part of the organic field when it comes to uptake vs emissions.
-
-# the conclusion of all these plots is:
-# So the model has partitioned the variance this way: organic's grain_fill 
-# advantage is attributed to the te() smooth (organic has superior climate 
-# sensitivity at warm/dry conditions), and what's left for the parametric 
-# organic × grain_fill term is near zero. The conventional grain_fill dip is 
-# attributed to the parametric terms because conventional's te() surface doesn't 
-# show strong sink dynamics at those conditions.
-
-
-# -- Model performance --------------------------------------------------------
-p5 <- plot_gam_observed_vs_predicted(bam_NEE, data1, flux_var = "NEE")
-
-# Residuals by crop stage: check for systematic stage-level bias
-p6 <- plot_gam_residuals_by_stage(bam_NEE, data1, flux_var = "NEE")
-
-
-
+# difference plot for te() surface: effects of climate on VARIABLE as indicated
+# by the difference in organic - conventional
+n_te <- plot_te_difference(
+  model           = bam_NEE,
+  data            = data1,
+  flux_var        = "NEE",
+  temp_var        = "air_temperature",
+  climate_var     = "VPD",
+  better_direction = "negative",
+  layout          = "temp_vpd"
+)
+n_te
