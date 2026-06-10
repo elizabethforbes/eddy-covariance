@@ -30,7 +30,7 @@ library(zoo)      # rollmean for Reco lagged climate predictors
 # so that cumulative totals reflect actual field carbon exchange across the
 # entire observation period.
 
-df <- ec_daily_mngmnt %>%
+df <- ec_daily_mngmnt3 %>%
   filter(year %in% 2018:2021) %>%
   mutate(
     management        = factor(as.character(management)),

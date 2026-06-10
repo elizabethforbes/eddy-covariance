@@ -101,19 +101,21 @@ gam_GPP_tensor2_ml <- update(gam_GPP_tensor2, method = "ML")
 
 AIC(gam_GPP_additive_ml, gam_GPP_tensor_ml, gam_GPP_tensor2_ml)
 #                         df      AIC
-# gam_GPP_additive_ml 49.39249 4651.388
-# gam_GPP_tensor_ml   59.90418 4634.628
-# gam_GPP_tensor2_ml  58.83325 4634.569
+# gam_GPP_additive_ml 48.94357 5082.339
+# gam_GPP_tensor_ml   63.80241 5043.723
+# gam_GPP_tensor2_ml  64.04496 5046.048
 
-# Likelihood ratio test: tensor2 (te) significantly better than tensor (ti)
+# Likelihood ratio test: tensor2 (te) NOT significantly better than tensor (ti)
 anova(gam_GPP_tensor, gam_GPP_tensor2)
-# no p-value due to negative deviance aka no significant improvement in fit
+# Resid. Df Resid. Dev     Df Deviance      F Pr(>F)
+# 1    1060.8     5027.6                              
+# 2    1059.0     5024.0 1.7726   3.6889 0.4452 0.6169
 
 # check concurvity of ti() model:
 concurvity(gam_GPP_tensor, full = TRUE)
 # Concurvity check: ti() model rejected in favour of te()
 # Air temperature and VPD show high concurvity in the decomposed ti() model
-# (observed > 0.97 for marginal smooths), consistent with their strong
+# (observed > 0.98 for marginal smooths), consistent with their strong
 # covariance in the Hudson Valley. Marginal effects are not independently
 # identifiable; joint effect modelled with te() instead.
 
@@ -148,8 +150,8 @@ gamm_GPP <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_GPP$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.6073267  
-# interpret: ~61% of today's residual is carried into the next day's. Previous (gam()) model 
+# 0.6006473  
+# interpret: ~60% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_GPP$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
 # lag is absorbed, indicating better model fit
@@ -158,7 +160,7 @@ acf(residuals(gamm_GPP$lme, type = "normalized"), main = "ACF of gamm LME normal
 # Autocorrelation correction: bam() with AR(1)
 #
 # ACF (autocorrelation function) of gam_GPP_tensor2 residuals showed significant lag-1 
-# autocorrelation (>0.45), confirmed by gamm() corAR1 estimate of phi = 0.61. 
+# autocorrelation (>0.45), confirmed by gamm() corAR1 estimate of phi = 0.60. 
 
 # Because the data contains gaps (tower outages), corAR1 within gamm() does not account
 # for unequal time spacing within years. bam() with rho + AR.start handles
@@ -346,34 +348,3 @@ g_te <- plot_te_difference(model           = bam_GPP,
                            better_direction = "positive",
                            layout          = "temp_vpd")
 g_te
-
-# Predicted NEE by stage ------------------------------------------------------
-# g3 <- plot_predicted_by_stage(bam_GPP, data1, flux_var = "GPP")
-# corrected for climate (VPD and air temperature)
-
-# Plot the te() surface: effects of VPD*temperature on NEE across management --
-# g4 <- plot_te_surface(bam_GPP, data1, flux_var = "GPP")
-# organic maintains higher atmospheric fixation through primary productivity
-# in hot, dry conditions, more so than the conventional field. Its atmospheric 
-# fixation potential is much higher at cold, humid levels than conventional; probably
-# reflects the lack of fallow conditions in winter. in extremely hot, fairly dry conditions
-# (temp > 20C, VPD < 1000) the organic field maintains a positive productivity level
-# while the conventional field is non-productive.
-
-# g4 + # add corner labels: 
-#   annotate("label", x = -10, y = .1,  label = "cool & humid air\n(low demand)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = 22,  y = .1,  label = "warm & humid air\n(productive)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = -10, y = 1.9, label = "cool & dry air\n(uncommon)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = 22,  y = 1.9, label = "hot & dry air\n(drought stress)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75))
-
-# 
-# # -- Model performance --------------------------------------------------------
-# g5 <- plot_gam_observed_vs_predicted(bam_GPP, data1, flux_var = "GPP")
-# 
-# # Residuals by crop stage: check for systematic stage-level bias
-# g6 <- plot_gam_residuals_by_stage(bam_GPP, data1, flux_var = "GPP")
-

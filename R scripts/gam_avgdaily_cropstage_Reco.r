@@ -101,11 +101,11 @@ gam_Reco_tensor2_ml <- update(gam_Reco_tensor2, method = "ML")
 
 AIC(gam_GPP_additive_ml, gam_Reco_tensor_ml, gam_Reco_tensor2_ml)
 #                         df      AIC
-# gam_GPP_additive_ml 49.39249 4651.388
-# gam_Reco_tensor_ml  64.18081 3188.126
-# gam_Reco_tensor2_ml 63.88245 3188.036
+# gam_GPP_additive_ml 48.94357 5082.339
+# gam_Reco_tensor_ml  62.10278 3462.854
+# gam_Reco_tensor2_ml 63.25722 3460.568
 
-# Likelihood ratio test: tensor2 (te) significantly better than tensor (ti)
+# Likelihood ratio test:
 anova(gam_Reco_tensor, gam_Reco_tensor2)
 # no p-value due to negative deviance aka no significant improvement in fit
 
@@ -148,7 +148,7 @@ gamm_Reco <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_Reco$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.9947313  
+# 0.9938945  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -281,16 +281,9 @@ gamm_Reco2 <- gamm(
   # method = "ML"
 )
 
-# gamm_Reco3 = same model with interaction in corARMA, just ML structure
-# gamm_Reco4 = also ML structure, without interaction in corARMA
-# AIC(gamm_Reco3, gamm_Reco4)
-# # df      AIC
-# # gamm_Reco3$lme 34 434.1785
-# # gamm_Reco4$lme 34 431.4870 indicates slightly better fit without interaction
-
 coef(gamm_Reco2$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.9934581  
+# 0.9907743  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco2$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -301,6 +294,17 @@ acf(residuals(gamm_Reco2$lme, type = "normalized"), main = "ACF of gamm LME norm
 # that cause residual autocorrelation. Use both corARMA structure and 7-day
 # smoothed air temp and VPD variables.
 
+# edit dataset so it includes only complete cases (bc of the averaging, you lose
+# ~80 days of data on VPD and air temp gap edges)
+
+data_model_Reco <- data1 |>
+  filter(complete.cases(pick(
+    Reco, air_temperature_7, VPD_7,
+    days_since_tillage, doy,
+    management, year_f,
+    crop_stage_simple
+  )))
+
 gamm_Reco_smoothed <- gamm(
   Reco ~
     management * crop_stage_simple +
@@ -310,7 +314,7 @@ gamm_Reco_smoothed <- gamm(
        by = as.factor(management),
        k  = c(8, 8)) +
     s(days_since_tillage, by = as.factor(management), k = 8),
-  data = data1,
+  data = data_model_Reco,
   correlation = corARMA(form = ~ 1 | management/year_f, p = 1, q = 1),
   method = "REML"
   # method = "ML"
@@ -318,7 +322,7 @@ gamm_Reco_smoothed <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.989817  
+# 0.9895651  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco_smoothed$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -328,7 +332,7 @@ acf(residuals(gamm_Reco_smoothed$lme, type = "normalized"), main = "ACF of gamm 
 resid_norm <- residuals(gamm_Reco_smoothed$lme, type = "normalized")
 plot(fitted(gamm_Reco_smoothed$lme), resid_norm,
      xlab = "fitted values", ylab = "normalized residuals", main = "Residuals vs. Fitted")
-abline(h = 0, col = "red", lty = 5) # some patterns of scatter around 7 but generally okay
+abline(h = 0, col = "red", lty = 5) # generally okay
 
 qqnorm(resid_norm) 
 qqline(resid_norm, col = "red", lty = 5) # a bit off, indicating outliers
@@ -340,7 +344,7 @@ hist(resid_norm, breaks = 30, main = "Histogram of Normalized Residuals",
 # final autocorrelation estimated parameters with ARMA (1,1) structure:
 coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi1    Theta1 
-# 0.989817 0.482016  
+# 0.9895651 0.4854106
 
 # phi = influence of previous time step's values on this one. 0.99 indicates strong persistence/memory
 # in Reco from day to day, suggesting gradual changes in Reco over time and general temporal stability
@@ -349,15 +353,28 @@ coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # unexpected deviations in Reco have moderate influence on current Reco value; short term environmental
 # disturbances will affect it but impact will fade pretty fast
 
-# calculate a pseudo R2 for this model since R2 is not useful here as it reflects two different
-# correlation structures (lm and gam) PLUS the corARMA structure makes it impossible to 
-# account for autocorrelation in predicted values
-
+# calculate a "pseudo R2":
 library(DescTools)
-# use CCC (concordance correlation coefficient) bc it's not possible to calculate R2
-CCC(obs, fits_lme)$rho.c
-#    est    lwr.ci    upr.ci
-# 0.6307068 0.5946755 0.6642096
+
+ccc <- CCC(
+  x = data_model_Reco$Reco,
+  y = fitted(gamm_Reco_smoothed$gam),
+  ci = "z-transform",
+  conf.level = 0.95
+)
+ccc$rho.c  # concordance correlation coefficient
+# est    lwr.ci    upr.ci
+# 1 0.5971292 0.5599567 0.6319026
+ccc$s.shift  # 1.365058; scale shift, means the model's predictions have a narrower spread than the obs values
+ccc$l.shift  # -0.05450753; location shift, negligible aka no systematic bias in mean
+
+# all in all, n = 1055 mean daily obs of ecosystem respiration, with a CCC of ~0.6
+
+# Note: I did explore using a gam with a family = Gamma and log link. however, 
+# this means I could not sufficiently deal with the great deal of autocorrelation in time.
+# I decided to stay with the Gaussian final model because it allowed me to correctly
+# deal with autocorrelation; if I'd gone with the 'correct' distributional family, I wouldn't
+# have been able to do that, and the temporal autocorrelation was severe.
 
 # -----------------------------------------------------------------------------
 # Summary tables: Reco (gamm model with corARMA structure and smoothed climate)
@@ -476,13 +493,6 @@ tbl_reco_smooths
 source(here::here("R scripts", "plot_databymanagement.r"))
 source(here::here("R scripts", "plot_te_difference.r"))
 
-
-# Main finding figure ---------------------------------------------------------
-# g1 <- plot_coef_plot(bam_GPP, flux_var = "GPP")
-
-# Main finding figure ---------------------------------------------------------
-# r1 <- plot_coef_plot(gamm_Reco_smoothed$gam, flux_var = "Reco")
-
 # Raw observed means, by management x stage — no climate correction -----------
 r2 <- plot_management_comparison(data1, flux_var = "Reco")
 r2 + labs( 
@@ -501,36 +511,3 @@ r_te <- plot_te_difference(
   layout          = "temp_vpd"
 )
 r_te
-
-
-# Predicted by stage ------------------------------------------------------
-# r3 <- plot_predicted_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
-# corrected for climate (VPD and air temperature)
-
-# Plot the te() surface: effects of VPD*temperature on NEE across management --
-# r4 <- plot_te_surface(gamm_Reco_smoothed$gam,
-                      # temp_var = "air_temperature_7", vpd_var = "VPD_7",
-                      # data1, flux_var = "Reco")
-# organic maintains higher atmospheric fixation through primary productivity
-# in hot, dry conditions, more so than the conventional field. Its atmospheric 
-# fixation potential is much higher at cold, humid levels than conventional; probably
-# reflects the lack of fallow conditions in winter. in extremely hot, fairly dry conditions
-# (temp > 20C, VPD < 1000) the organic field maintains a positive productivity level
-# while the conventional field is non-productive.
-
-# # add corner labels:
-# r4 + 
-#   annotate("label", x = -4, y = .25,  label = "cool & humid air\n(low demand)",
-#               color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = 20,  y = .25,  label = "warm & humid air\n(productive)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = -4, y = 1.3, label = "cool & dry air\n(uncommon)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75)) +
-#   annotate("label", x = 20,  y = 1.3, label = "hot & dry air\n(drought stress)",
-#            color = "grey20", size = 2.6, label.size = 0, fill = alpha("white", 0.75))
-
-# -- Model performance --------------------------------------------------------
-# r5 <- plot_gam_observed_vs_predicted(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
-
-# Residuals by crop stage: check for systematic stage-level bias
-# r6 <- plot_gam_residuals_by_stage(gamm_Reco_smoothed$gam, data1, flux_var = "Reco")
