@@ -17,7 +17,7 @@
 #   source(here::here("R scripts", "gam_avgdaily_cropstage_GPP.r"))
 #   source(here::here("R scripts", "gam_avgdaily_cropstage_Reco.r"))
 #
-# Also required: ec_daily_mngmnt (full dataset, all years, all crops)
+# Also required: ec_daily_mngmnt3 (full dataset, all years, all crops)
 #
 # Analysis period: 2018–2021 (years with management + yield data)
 # Units assumed: gC m⁻² d⁻¹ for all flux variables (NEE, GPP, Reco)
@@ -44,7 +44,7 @@ library(zoo)      # rollmean for Reco lagged climate predictors
 # so that cumulative totals reflect actual field carbon exchange across the
 # entire observation period.
 
-data_cumul <- ec_daily_mngmnt %>%
+data_cumul <- ec_daily_mngmnt3 %>%
   filter(year %in% 2018:2021) %>%
   mutate(
     management        = factor(as.character(management)),
@@ -79,6 +79,7 @@ cat("Crop stage levels:", levels(data_cumul$crop_stage_simple), "\n")
 # (rolling mean NAs at start of each management group)
 n_rollmean_na <- sum(is.na(data_cumul$air_temperature_7) | is.na(data_cumul$VPD_7))
 cat("Rows with NA rolling means (unfillable for Reco):", n_rollmean_na, "\n")
+# 882 total
 
 # =============================================================================
 # SECTION 1b: Bring in ERA5-filled climate predictors
@@ -145,6 +146,8 @@ data_cumul <- data_cumul %>%
 n_rollmean_na_after <- sum(is.na(data_cumul$air_temperature_7) | is.na(data_cumul$VPD_7))
 cat("Rolling-mean NAs after ERA5 fill:", n_rollmean_na_after,
     "(was", n_rollmean_na, "before)\n")
+# Rolling-mean NAs after ERA5 fill: 12 (was 882 before)
+# six at the start of each time series (conv and org)
 
 # =============================================================================
 # SECTION 2: Identify year random effect term names
@@ -810,6 +813,7 @@ p_cumNEE <- ggplot(cumul_daily,
   theme(legend.position = "bottom",
         panel.grid.minor = element_blank())
 
+p_cumNEE
 # --- 9b: Running cumulative NEE vs NECB (step-function harvest jumps) --------
 # Build a step-function version of NECB for each field-year by adding harvest
 # C export at the harvest doy. Before the first harvest: NECB = cumNEE.
@@ -863,6 +867,7 @@ p_cumNECB <- ggplot(cumul_with_harvest,
   theme(legend.position = "bottom",
         panel.grid.minor = element_blank())
 
+p_cumNECB
 # --- 9c: Annual NEE bar chart -------------------------------------------------
 # 2021 bars are hatched (alpha = 0.5) to signal partial-year coverage.
 # A footnote annotation is added instead of overloading the legend.
@@ -887,7 +892,7 @@ p_annual_nee <- ggplot(annual_totals,
     y = expression("NEE (gC m"^{-2}*")"),
     fill  = NULL
   ) +
-  ylim(-250, 610) +
+  # ylim(-250, 610) +
   theme_bw(base_size = 8) +
   theme(legend.position = "bottom", panel.grid.minor = element_blank())
 
@@ -913,7 +918,7 @@ p_annual_necb <- ggplot(annual_totals,
     y = expression("NECB (gC m"^{-2}*")"),
     fill  = NULL
   ) +
-  ylim(-250, 610) +
+  # ylim(-250, 610) +
   theme_bw(base_size = 8) +
   theme(legend.position = "none", panel.grid.minor = element_blank())
 
@@ -1002,20 +1007,9 @@ status_colours <- c(
   "Unfilled"              = "#CFCFCF"    # light grey
 )
 
-# Harvest events: shown as downward-pointing triangles on the year-strip baseline
-harvest_markers <- harvest_events %>%
-  mutate(
-    field_label = factor(
-      dplyr::recode(as.character(management),
-                    "organic"      = "Organic",
-                    "conventional" = "Conventional"),
-      levels = c("Conventional", "Organic")
-    ),
-    year_f = factor(year, levels = rev(sort(unique(data_cumul$year))))
-  )
-
-p_data_avail <- ggplot(gap_vis,
-                       aes(x = doy, y = year_f, fill = status)) +
+p_data_avail <- gap_vis %>% 
+  filter(year_f != 2021) %>% 
+  ggplot(aes(x = doy, y = year_f, fill = status)) +
   geom_tile(height = 0.85, linewidth = 0) +
   # # Harvest triangles just below each year strip
   # geom_point(
@@ -1067,6 +1061,8 @@ print(p_cumNEE)
 print(p_cumNECB)
 print(p_annual_nee + p_annual_necb)   # side by side via patchwork
 print(p_annual_gpp_reco)
+print(p_gapfill_inspect)
+print(p_data_avail)
 
 # =============================================================================
 # SECTION 10: Publication-ready summary table
@@ -1084,10 +1080,7 @@ print(p_annual_gpp_reco)
 #   NECB             — net ecosystem carbon balance ± 95% CI (gC m⁻² yr⁻¹)
 #   C balance        — qualitative designation (sink / near-neutral / source)
 #
-# GPP and Reco are excluded from this table: the Reco model (gamm_Reco_smoothed)
-# was trained on non-alfalfa data and over-predicts during high-gap organic
-# alfalfa periods. GPP/Reco annual totals are reported in the supplement with
-# appropriate caveats.
+# GPP and Reco are excluded from this table
 #
 # Uncertainty: ±1.96 × propagated gap-filling prediction SE (observed days
 # contribute zero variance; harvest C treated as fixed/measured).
