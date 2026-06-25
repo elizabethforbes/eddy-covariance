@@ -99,15 +99,16 @@ gam_Reco_additive_ml <- update(gam_Reco_additive, method = "ML")
 gam_Reco_tensor_ml   <- update(gam_Reco_tensor,   method = "ML")
 gam_Reco_tensor2_ml <- update(gam_Reco_tensor2, method = "ML")
 
-AIC(gam_GPP_additive_ml, gam_Reco_tensor_ml, gam_Reco_tensor2_ml)
+AIC(gam_Reco_additive_ml, gam_Reco_tensor_ml, gam_Reco_tensor2_ml)
 #                         df      AIC
-# gam_GPP_additive_ml 48.94357 5082.339
-# gam_Reco_tensor_ml  62.10278 3462.854
-# gam_Reco_tensor2_ml 63.25722 3460.568
+# gam_Reco_additive_ml 52.66513 3496.631
+# gam_Reco_tensor_ml   62.12131 3462.729
+# gam_Reco_tensor2_ml  63.38430 3460.741
 
 # Likelihood ratio test:
 anova(gam_Reco_tensor, gam_Reco_tensor2)
-# no p-value due to negative deviance aka no significant improvement in fit
+# 1    1058.4     1246.6                               
+# 2    1062.5     1247.5 -4.0722 -0.92653 0.1963 0.9425
 
 # check concurvity of ti() model:
 concurvity(gam_Reco_tensor, full = TRUE)
@@ -148,7 +149,7 @@ gamm_Reco <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_Reco$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.9938945  
+# 0.9939241  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -254,7 +255,7 @@ for (i in 2:length(r)) {
   }
 }
 acf(r_white, main = "ACF of whitened bam_Reco2 (with climate lags) residuals") # decorrelated residuals: within the range
-# ACF still really high at lag-1; around .7 still.
+# ACF still really high at lag-1; around .75 still.
 
 # attempt 2: use more complex, higher-order structure for ACF, like corARMA
 # AR(1) assumes correlation only between adjacent residuals decaying exponentially.
@@ -283,7 +284,7 @@ gamm_Reco2 <- gamm(
 
 coef(gamm_Reco2$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.9907743  
+# 0.9907772  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco2$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -322,7 +323,7 @@ gamm_Reco_smoothed <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.9895651  
+# 0.9895475  
 # interpret: ~99% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_Reco_smoothed$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -344,7 +345,7 @@ hist(resid_norm, breaks = 30, main = "Histogram of Normalized Residuals",
 # final autocorrelation estimated parameters with ARMA (1,1) structure:
 coef(gamm_Reco_smoothed$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi1    Theta1 
-# 0.9895651 0.4854106
+# 0.9895475 0.4856117 
 
 # phi = influence of previous time step's values on this one. 0.99 indicates strong persistence/memory
 # in Reco from day to day, suggesting gradual changes in Reco over time and general temporal stability
@@ -363,10 +364,11 @@ ccc <- CCC(
   conf.level = 0.95
 )
 ccc$rho.c  # concordance correlation coefficient
-# est    lwr.ci    upr.ci
-# 1 0.5971292 0.5599567 0.6319026
-ccc$s.shift  # 1.365058; scale shift, means the model's predictions have a narrower spread than the obs values
-ccc$l.shift  # -0.05450753; location shift, negligible aka no systematic bias in mean
+#     est    lwr.ci    upr.ci
+# 0.5963045 0.5590034 0.6311969
+ccc$s.shift  # 1.35999; scale shift, means the model's predictions have a 
+# narrower spread than the obs values
+ccc$l.shift  # -0.05549754; location shift, negligible aka no systematic bias in mean
 
 # all in all, n = 1055 mean daily obs of ecosystem respiration, with a CCC of ~0.6
 

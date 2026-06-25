@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document>
+	<name>October2018-EF01.kml</name>
+	<Style id="sn_wht-blank80">
+		<IconStyle>
+			<color>ffff5500</color>
+			<scale>1.1</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/paddle/wht-blank.png</href>
+			</Icon>
+			<hotSpot x="32" y="1" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<ListStyle>
+			<ItemIcon>
+				<href>http://maps.google.com/mapfiles/kml/paddle/wht-blank-lv.png</href>
+			</ItemIcon>
+		</ListStyle>
+	</Style>
+	<StyleMap id="msn_wht-blank260">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#sn_wht-blank80</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#sh_wht-blank30</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Style id="sh_wht-blank30">
+		<IconStyle>
+			<color>ffff5500</color>
+			<scale>1.3</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/paddle/wht-blank.png</href>
+			</Icon>
+			<hotSpot x="32" y="1" xunits="pixels" yunits="pixels"/>
+		</IconStyle>
+		<ListStyle>
+			<ItemIcon>
+				<href>http://maps.google.com/mapfiles/kml/paddle/wht-blank-lv.png</href>
+			</ItemIcon>
+		</ListStyle>
+	</Style>
+	<Folder>
+		<name>October2018</name>
+		<open>1</open>
+		<Placemark>
+			<name>Oct18</name>
+			<LookAt>
+				<longitude>-73.7700813240502</longitude>
+				<latitude>42.16568104622538</latitude>
+				<altitude>0</altitude>
+				<heading>5.640650433743157e-05</heading>
+				<tilt>22.32457504565928</tilt>
+				<range>378.8262188339187</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#msn_wht-blank260</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>-73.77062955337117,42.16668445800072,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>Oct18</name>
+			<LookAt>
+				<longitude>-73.7700813240502</longitude>
+				<latitude>42.16568104622538</latitude>
+				<altitude>0</altitude>
+				<heading>5.640650433743157e-05</heading>
+				<tilt>22.32457504565928</tilt>
+				<range>378.8262188339187</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#msn_wht-blank260</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>-73.77149708000555,42.16560193242143,0</coordinates>
+			</Point>
+		</Placemark>
+		<Placemark>
+			<name>Oct18</name>
+			<LookAt>
+				<longitude>-73.7700813240502</longitude>
+				<latitude>42.16568104622538</latitude>
+				<altitude>0</altitude>
+				<heading>5.640650433743157e-05</heading>
+				<tilt>22.32457504565928</tilt>
+				<range>378.8262188339187</range>
+				<gx:altitudeMode>relativeToSeaFloor</gx:altitudeMode>
+			</LookAt>
+			<styleUrl>#msn_wht-blank260</styleUrl>
+			<Point>
+				<gx:drawOrder>1</gx:drawOrder>
+				<coordinates>-73.76980077037997,42.16558336516308,0</coordinates>
+			</Point>
+		</Placemark>
+	</Folder>
+</Document>
+</kml>

@@ -1,0 +1,3 @@
+model,family,link,n,R2_adj,deviance_explained,REML_or_GCV,note
+NEE,gaussian,identity,1135,0.672,68.9,2243.93,NA
+GPP,gaussian,identity,1135,0.814,82.3,2319.46,NA

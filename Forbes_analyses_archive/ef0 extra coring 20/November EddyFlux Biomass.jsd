@@ -1,0 +1,20 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "Picture",
+        "shortname": "Picture",
+        "alias": "Picture",
+        "type": "esriFieldTypeString",
+        "length": 255,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "November EddyFlux Biomass_Picture_9d896481-fd82-4635-8209-48218920713c",
+        "defaultValue": null
+      }
+    ]
+  }
+}

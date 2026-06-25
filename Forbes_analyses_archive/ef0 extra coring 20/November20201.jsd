@@ -1,0 +1,20 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "Picture",
+        "shortname": "Picture",
+        "alias": "Picture",
+        "type": "esriFieldTypeString",
+        "length": 255,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "November20201_Picture_695c9560-ead8-4659-8d55-bf46ddb9ca05",
+        "defaultValue": null
+      }
+    ]
+  }
+}

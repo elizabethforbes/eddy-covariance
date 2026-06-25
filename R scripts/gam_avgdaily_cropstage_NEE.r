@@ -150,15 +150,15 @@ gam_NEE_tensor2_ml <- update(gam_NEE_tensor2, method = "ML")
 
 AIC(gam_NEE_additive_ml, gam_NEE_tensor_ml, gam_NEE_tensor2_ml)
 #                         df      AIC
-# gam_NEE_additive_ml 51.21994 4720.453
-# gam_NEE_tensor_ml   58.42811 4269.127 # this model has the best AIC, but need to check concurvity of interaction terms
-# gam_NEE_tensor2_ml  61.42126 4671.896
+# gam_NEE_additive_ml 51.15988 4725.101
+# gam_NEE_tensor_ml   60.10648 4657.745
+# gam_NEE_tensor2_ml  65.01893 4655.843
 
 # check concurvity of ti() model: basically, can one smooth term be approximated by a combination of the other smooths in the model?
-concurvity(gam_NEE_tensor2, full = TRUE)
+concurvity(gam_NEE_tensor, full = TRUE)
 # Concurvity check: ti() model rejected in favour of te()
 # Air temperature and VPD show high concurvity in the decomposed ti() model
-# (observed > 0.96 for marginal smooths), consistent with their strong
+# (observed > 0.99 for marginal smooths), consistent with their strong
 # covariance in the Hudson Valley. Marginal effects are not independently
 # identifiable; joint effect should be modeled with te() instead.
 
@@ -189,7 +189,7 @@ gamm_NEE <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_NEE$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.4105307  
+# 0.4110967  
 # interpret: 41% of today's residual is carried into the next day's. 
 # Previous (gam()) model was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_NEE$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -371,7 +371,7 @@ plot(simulationOutput)
 gam.check(bam_NEE)
 # however, the histogram is clean as are the response vs. fitted values.
 # the distribution of residuals is very peaked, but that's ok; and, 
-# the model converged quickly (10 iterations) and the k checks indicate good
+# the model converged quickly (12 iterations) and the k checks indicate good
 # (aka not overfitting) the smooths, and the te() terms are only using 14 of 63 EDFs
 # (aka, also not overfitting)
 
@@ -389,7 +389,8 @@ source(here::here("R scripts", "plot_te_difference.r"))
 
 # Raw observed means, by management x stage — no climate correction -----------
 p2 <- plot_management_comparison(data1, flux_var = "NEE")
-p2 + coord_cartesian(ylim = c(-10, 10))    # before saving / returning
+p2 
+# + coord_cartesian(ylim = c(-10, 10))    # before saving / returning
 
 # difference plot for te() surface: effects of climate on VARIABLE as indicated
 # by the difference in organic - conventional

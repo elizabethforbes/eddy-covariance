@@ -1,0 +1,33 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "Picture",
+        "shortname": "Picture",
+        "alias": "Picture",
+        "type": "esriFieldTypeString",
+        "length": 255,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "C-1_Picture_e394f6bf-3764-41c8-9a35-ac84b8f828cd",
+        "defaultValue": null
+      },
+      {
+        "name": "Accuracy",
+        "shortname": "Accuracy",
+        "alias": "Accuracy",
+        "type": "esriFieldTypeDouble",
+        "length": 8,
+        "nullable": true,
+        "editable": false,
+        "required": false,
+        "heritable": false,
+        "domain": "C-1_Accuracy_3c975eb3-61e6-45af-92c0-64634006e3d1",
+        "defaultValue": null
+      }
+    ]
+  }
+}

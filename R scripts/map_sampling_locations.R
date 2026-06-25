@@ -28,30 +28,69 @@ library(readxl)
 library(ggspatial)
 library(patchwork)   # side-by-side panels
 
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+
 Sys.setenv(SHAPE_RESTORE_SHX = "YES")
 
 
-# ── 1. Load & reproject all layers ──────────────────────────
+################################################################################
+# load and re-project all the different layers: towers, collars, and cores
+################################################################################
+
 setwd('/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance')
 
-fields <- st_read("eddy_covariance_fluxdata/shape files_fields/Shape_File.shp", quiet = TRUE)   # EPSG:32115
-target_crs <- st_crs(fields)
+################################################################################
+# cores
+################################################################################
 
-# Soil cores — fix the swapped field_ID by relying on spatial location
-cores_raw <- read.csv("eddy_covariance_fluxdata/2020_soilcoring_locations.csv")
-cores_raw <- cores_raw[, !grepl("Unnamed", names(cores_raw))]
+# List of core location shapefile paths (adjust paths as needed)
+shapefile_paths <- c(
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Nov2019_1.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Nov2019_2.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Nov2019_3.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Nov2019_1.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Nov2019_2.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Nov2019_3.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Oct2018_1.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Oct2018_2.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/conv_Oct2018_3.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Oct2018_1.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Oct2018_2.shp",
+  "/Users/elizabethforbes/Documents/Hudson Carbon/eddy covariance/eddy_covariance_fluxdata/fall 2020 core sampling sites/org_Oct2018_3.shp"
+)
 
-cores_sf <- st_as_sf(cores_raw, coords = c("X", "Y"), crs = target_crs) %>%
-  # Re-assign management by latitude (organic ~42.166°N, conventional ~42.116°N)
-  mutate(
-    lat_approx = st_coordinates(st_transform(., 4326))[, 2],
-    management = if_else(lat_approx > 42.14, "organic", "conventional")
-  )
+# Read all shapefiles into a list
+sf_list <- lapply(shapefile_paths, st_read)
 
+# combine all core locations into a list
+cores_sf <- do.call(rbind, sf_list)
+
+# add management, year columns (tho reminder these were all collected in Nov. 2020):
+cores_sf <- cores_sf %>% 
+  mutate(year = case_when(
+    grepl("2019", layer) ~ "2019",
+    TRUE ~ "2018"
+  )) %>% 
+  mutate(management = case_when(
+    st_coordinates(st_centroid(geometry))[, "Y"] < 42.15 ~ "conventional",
+    st_coordinates(st_centroid(geometry))[, "Y"] > 42.15 ~ "organic"
+  ))
+
+cores_sf_nyeast <- st_transform(cores_sf, crs = 4326)  # Transform to NAD83 / New York East
+
+################################################################################
 # EC towers
-towers_sf <- read_xlsx("eddy_covariance_fluxdata/EC_tower_locations.xlsx") %>%
-  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
-  st_transform(target_crs)
+################################################################################
+
+towers_sf <- read_excel("eddy_covariance_fluxdata/EC_tower_locations.xlsx")
+towers_sf <- towers_sf %>% 
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+################################################################################
+# collars
+################################################################################
 
 # Collars — read all files per treatment, combine, and deduplicate.
 # The files are overlapping (each was saved with prior points still
@@ -89,159 +128,102 @@ org_collars <- read_collars(
   "organic"
 )
 
-message("Conventional collars: ", nrow(conv_collars), " unique points")
-message("Organic collars: ",      nrow(org_collars),  " unique points")
+conv_collars_sf <- st_transform(conv_collars, crs = 4326) 
+org_collars_sf <- st_transform(org_collars, crs = 4326)
 
-
-# ── 2. Organic field polygon (HF 12, Csite = EF01) ──────────
-
-organic_field <- fields %>% filter(Csite == "EF01")
-
-# ── 3. Shared visual settings ───────────────────────────────
-
-BUFFER  <- 80    # metres of padding around each panel extent
+################################################################################
+# create shared visual settings
+################################################################################
 
 field_fill   <- "#b2df8a"   # soft green for field polygon
 collar_col   <- "#7570b3"   # purple  — collars
 core_col     <- "#d95f02"   # orange  — soil cores
 tower_col    <- "#1b9e77"   # teal    — EC tower
 
-# ── 4. Helper: build a panel ────────────────────────────────
-
+# ── make map panels, then stitch together ───────────────────────────────
 make_panel <- function(panel_title,
-                       field_poly,       # sf polygon or NULL
                        cores_data,
                        collars_data,
+                       buf,
                        tower_data,
-                       buf = BUFFER,
                        show_legend = FALSE) {
-
-  # Bounding box from all points + optional polygon
+  
+  # Bounding box from all points
   all_pts <- bind_rows(cores_data, collars_data, tower_data)
-  if (!is.null(field_poly) && nrow(field_poly) > 0) {
-    bbox <- st_bbox(c(st_bbox(all_pts), st_bbox(field_poly)))
-  } else {
-    bbox <- st_bbox(all_pts)
-  }
+  bbox <- st_bbox(all_pts)
+  
+  xlim <- c(bbox["xmin"] - buf
+            , bbox["xmax"] + buf) 
+  ylim <- c(bbox["ymin"] - buf
+            , bbox["ymax"] + buf) 
 
-  xlim <- c(bbox["xmin"] - buf, bbox["xmax"] + buf)
-  ylim <- c(bbox["ymin"] - buf, bbox["ymax"] + buf)
-
-  p <- ggplot()
-
-  # Field polygon (organic only — conventional has none in shapefile)
-  # if (!is.null(field_poly) && nrow(field_poly) > 0) {
-  #   p <- p +
-  #     geom_sf(data = field_poly, fill = field_fill,
-  #             colour = "grey40", linewidth = 0.6, alpha = 0.5)
-  # }
-
-  # Soil cores
-  p <- p +
+  # Calculate the aspect ratio based on the data extents
+  aspect_ratio <- diff(xlim) / diff(ylim)
+  
+  p <- ggplot() +
+    
+    # Soil cores
     geom_sf(data = cores_data,
             colour = core_col, fill = core_col,
-            shape = 21, size = 3) +
-
+            shape = 21, size = 1) +
+    
     # Collars
     geom_sf(data = collars_data,
             colour = collar_col,
-            shape = 1, size = 2, stroke = 1.0) +
-
+            shape = 1, size = 1, stroke = 1.0) +
+    
     # EC tower
     geom_sf(data = tower_data,
             colour = tower_col,
-            shape =13, size = 3, stroke = 1.0) +
-
+            shape = 13, size = 3, stroke = 1.0) +
+    
     # Panel title as annotation
     annotate("text",
-             x = xlim[1] + 0.05 * diff(xlim),
-             y = ylim[2] - 0.05 * diff(ylim),
+             # x = xlim + 0.05 * diff(xlim),
+             # y = ylim - 0.05 * diff(ylim),
+             x = xlim + 0.05,
+             y = ylim + 0.05,
              label = panel_title,
              hjust = 0, vjust = 1,
              size = 4, fontface = "bold") +
-
+    
     coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
-    annotation_scale(location = "br", width_hint = 0.3,
-                     text_cex = 0.7) +
-
+    annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
+    
     theme_bw(base_size = 11) +
     theme(
       axis.text        = element_text(size = 7),
       axis.title       = element_blank(),
       panel.grid.major = element_line(colour = "grey85", linewidth = 0.25),
-      legend.position  = if (show_legend) "bottom" else "none"
+      legend.position  = if (show_legend) "bottom" else "none",
+      aspect.ratio     = aspect_ratio  # Enforce consistent panel dimensions
     )
+  
 
-  p
 }
 
-# ── 5. Build each panel ─────────────────────────────────────
+BUFFER  <- .0008
+# metres of padding around each panel extent
 
-p_organic <- make_panel(
-  panel_title  = "Organic field",
-  field_poly   = organic_field,
-  cores_data   = cores_sf %>% filter(management == "organic"),
-  collars_data = org_collars,
-  tower_data   = towers_sf %>% filter(management == "organic")
-)
-
-p_conv <- make_panel(
-  panel_title  = "Conventional field",
-  field_poly   = NULL,   # not in shapefile
-  cores_data   = cores_sf %>% filter(management == "conventional"),
-  collars_data = conv_collars,
-  tower_data   = towers_sf %>% filter(management == "conventional")
-)
+# Create panels with consistent dimensions
+org <- make_panel(
+  panel_title = "Organic field",
+  cores_data = cores_sf_nyeast %>% filter(management == "organic"),
+  collars_data = org_collars_sf,
+  tower_data = towers_sf %>% filter(management == "organic"),
+  buf = BUFFER
+) + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
 
 
-# ── 6. Shared legend via a dummy plot ───────────────────────
+conv <- make_panel(
+  panel_title = "Conventional field",
+  cores_data   = cores_sf_nyeast %>% filter(management == "conventional"),
+  collars_data = conv_collars_sf,
+  tower_data   = towers_sf %>% filter(management == "conventional"),
+  buf = BUFFER
+) + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
 
-legend_data <- data.frame(
-  x    = 1:3,
-  y    = 1,
-  type = c("Soil core", "Gas exchange collar", "EC tower")
-)
-shapes <- c("Soil core" = 21, "Gas exchange collar" = 0, "EC tower" = 8)
-cols   <- c("Soil core" = core_col,
-            "Gas exchange collar" = collar_col,
-            "EC tower" = tower_col)
+# Combine panels
+combined_plot <- org + conv
+print(combined_plot)
 
-legend_plot <- ggplot(legend_data, aes(x, y, shape = type, colour = type)) +
-  geom_point(size = 3, stroke = 1.2) +
-  scale_shape_manual(values = shapes, name = NULL) +
-  scale_colour_manual(values = cols,  name = NULL) +
-  theme_void() +
-  theme(legend.position  = "bottom",
-        legend.direction = "horizontal",
-        legend.text      = element_text(size = 10),
-        legend.key.size  = unit(1, "lines"))
-
-shared_legend <- cowplot::get_legend(legend_plot)
-
-
-# ── 7. Assemble with patchwork ──────────────────────────────
-
-library(patchwork)
-library(cowplot)   # for get_legend
-
-combined <- (p_organic | p_conv) /
-  wrap_elements(shared_legend) +
-  plot_layout(heights = c(10, 1)) +
-  plot_annotation(
-    # title   = "Sampling locations",
-    caption = "CRS: NAD83 / New York West (EPSG:32115)",
-    theme   = theme(plot.title = element_text(face = "bold", size = 13))
-  )
-
-print(combined)
-
-
-# ── 8. Save ─────────────────────────────────────────────────
-
-ggsave("map_sampling_locations.png",
-       plot   = combined,
-       width  = 10,
-       height = 6,
-       dpi    = 300)
-
-message("Saved → map_sampling_locations.png")

@@ -1,0 +1,46 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "point",
+        "shortname": "point",
+        "alias": "point",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "FinalStoneHousePoints_point_08cb9762-3908-476e-a20a-c16bb667a750",
+        "defaultValue": null
+      },
+      {
+        "name": "layer",
+        "shortname": "layer",
+        "alias": "layer",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "path",
+        "shortname": "path",
+        "alias": "path",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      }
+    ]
+  }
+}

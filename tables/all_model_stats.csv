@@ -1,3 +1,4 @@
 model,family,link,n,R2_adj,deviance_explained,REML_or_GCV,note
-NEE,gaussian,identity,1028,0.689,70.6,2050.23,NA
-GPP,gaussian,identity,1028,0.823,83.3,2117.83,NA
+NEE,gaussian,identity,1135,0.672,68.9,2243.93,NA
+GPP,gaussian,identity,1135,0.814,82.3,2319.46,NA
+Reco,gaussian,identity,1055,-0.204,NA,NA,"GAMM R^2 inflated by ARMA(1,1) correlation structure (fitted-value variance > observed). Use CCC = 0.631 (95% CI 0.595-0.664) instead."

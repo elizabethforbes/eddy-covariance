@@ -1,0 +1,46 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "OBJECTID",
+        "shortname": "OBJECTID",
+        "alias": "OBJECTID",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "east_GCS_OBJECTID_8eba188b-3f42-47e5-bc93-18545915835e",
+        "defaultValue": null
+      },
+      {
+        "name": "Picture",
+        "shortname": "Picture",
+        "alias": "Picture",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "instance",
+        "shortname": "instance",
+        "alias": "instance",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "east_GCS_instance_ffddc8ca-b95f-40d4-8197-366068b943d8",
+        "defaultValue": null
+      }
+    ]
+  }
+}

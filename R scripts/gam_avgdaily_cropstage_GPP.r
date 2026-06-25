@@ -101,21 +101,21 @@ gam_GPP_tensor2_ml <- update(gam_GPP_tensor2, method = "ML")
 
 AIC(gam_GPP_additive_ml, gam_GPP_tensor_ml, gam_GPP_tensor2_ml)
 #                         df      AIC
-# gam_GPP_additive_ml 48.94357 5082.339
-# gam_GPP_tensor_ml   63.80241 5043.723
-# gam_GPP_tensor2_ml  64.04496 5046.048
+# gam_GPP_additive_ml 48.96208 5081.805
+# gam_GPP_tensor_ml   63.79288 5043.454
+# gam_GPP_tensor2_ml  64.04918 5045.872
 
 # Likelihood ratio test: tensor2 (te) NOT significantly better than tensor (ti)
 anova(gam_GPP_tensor, gam_GPP_tensor2)
 # Resid. Df Resid. Dev     Df Deviance      F Pr(>F)
-# 1    1060.8     5027.6                              
-# 2    1059.0     5024.0 1.7726   3.6889 0.4452 0.6169
+# 1    1062.9     5036.3                              
+# 2    1059.0     5023.1 3.9084   13.217 0.7236 0.5728
 
 # check concurvity of ti() model:
 concurvity(gam_GPP_tensor, full = TRUE)
 # Concurvity check: ti() model rejected in favour of te()
 # Air temperature and VPD show high concurvity in the decomposed ti() model
-# (observed > 0.98 for marginal smooths), consistent with their strong
+# (observed > 0.97 for marginal smooths), consistent with their strong
 # covariance in the Hudson Valley. Marginal effects are not independently
 # identifiable; joint effect modelled with te() instead.
 
@@ -150,7 +150,7 @@ gamm_GPP <- gamm(
 # investigate phi (the AR(1) autocorrelation structure value)
 coef(gamm_GPP$lme$modelStruct$corStruct, unconstrained = FALSE)
 # Phi 
-# 0.6006473  
+# 0.5995746  
 # interpret: ~60% of today's residual is carried into the next day's. Previous (gam()) model 
 # was underestimating SE without autocorrelation accounting.
 acf(residuals(gamm_GPP$lme, type = "normalized"), main = "ACF of gamm LME normalized residuals") 
@@ -335,7 +335,8 @@ source(here::here("R scripts", "plot_te_difference.r"))
 
 # Raw observed means, by management x stage — no climate correction -----------
 g2 <- plot_management_comparison(data1, flux_var = "GPP")
-g2  + coord_cartesian(ylim = c(-5, 20))    # before saving / returning
+g2  
+# + coord_cartesian(ylim = c(-5, 20))    # before saving / returning
 
 # difference plot for te() surface: effects of climate on VARIABLE as indicated
 # by the difference in organic - conventional

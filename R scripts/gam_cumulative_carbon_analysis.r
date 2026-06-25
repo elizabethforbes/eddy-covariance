@@ -1060,6 +1060,8 @@ print(p_data_avail)
 print(p_cumNEE)
 print(p_cumNECB)
 print(p_annual_nee + p_annual_necb)   # side by side via patchwork
+# side by side, and edited y-axis:
+print((p_annual_nee+ylim(-400,600))+(p_annual_necb+ylim(-400,600)+labs(subtitle = element_blank())))
 print(p_annual_gpp_reco)
 print(p_gapfill_inspect)
 print(p_data_avail)
@@ -1384,7 +1386,7 @@ ft3 <- flextable(table_data_with_NECB) %>%
     Field      = "Field",
     Year       = "Year",
     Crop       = "Crop",
-    Period     = "Observation period",
+    # Period     = "Observation period",
     Days       = "Days",
     `Gap-filled (%)`  = "Gap-filled (%)",
     NEE        = "NEE\n(gC m\u207b\u00b2)",
@@ -1400,7 +1402,9 @@ ft3 <- flextable(table_data_with_NECB) %>%
   # Right-align numeric columns, left-align text
   align(j = c("NEE", "Harvest C", "NECB", "Days", "Gap-filled (%)"),
         align = "right", part = "all") %>%
-  align(j = c("Field", "Year", "Crop", "Period", "C balance with export"),
+  align(j = c("Field", "Year", "Crop",
+              # "Period", 
+              "C balance with export"),
         align = "left", part = "all") %>%
   
   # Colour-code C balance column
@@ -1411,13 +1415,17 @@ ft3 <- flextable(table_data_with_NECB) %>%
   bold(i = ~ `C balance with export` == "Source", j = "C balance with export") %>%
   
   # Light shading for partial-year rows
-  bg(i = ~ grepl("\u2020", Year), bg = "#F5F5F5") %>%
+  # bg(i = ~ grepl("\u2020", Year), bg = "#F5F5F5") %>%
+  
+  # light shading for each management:
+  bg(i = ~ grepl("Conventional", Field), bg = "#ffe5e1") %>% 
+  bg(i = ~ grepl("Organic", Field), bg = "#fff0ce") %>% 
   
   # Column widths (inches, for Word)
   width(j = "Field",       width = 1.4) %>%
   width(j = "Year",        width = 0.45) %>%
   width(j = "Crop",        width = 1.3) %>%
-  width(j = "Period",      width = 1.1) %>%
+  # width(j = "Period",      width = 1.1) %>%
   width(j = "Days",        width = 0.4) %>%
   width(j = "Gap-filled (%)",     width = 0.5) %>%
   width(j = "NEE",         width = 0.95) %>%

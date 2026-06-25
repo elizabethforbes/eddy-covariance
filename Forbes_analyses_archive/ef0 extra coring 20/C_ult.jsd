@@ -1,0 +1,59 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "OBJECTID_1",
+        "shortname": "OBJECTID_1",
+        "alias": "OBJECTID_1",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "C_ult_OBJECTID_1_6d2e4051-ae63-4dfa-9a68-620de58621e7",
+        "defaultValue": null
+      },
+      {
+        "name": "descriptio",
+        "shortname": "descriptio",
+        "alias": "descriptio",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "Year",
+        "shortname": "Year",
+        "alias": "Year",
+        "type": "esriFieldTypeInteger",
+        "length": 2,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "C_ult_Year_96892e71-344a-476c-bb25-a4bc6409c3e2",
+        "defaultValue": null
+      },
+      {
+        "name": "Bearing",
+        "shortname": "Bearing",
+        "alias": "Bearing",
+        "type": "esriFieldTypeString",
+        "length": 50,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      }
+    ]
+  }
+}

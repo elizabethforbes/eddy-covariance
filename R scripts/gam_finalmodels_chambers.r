@@ -12,7 +12,7 @@ library(patchwork)
 # =============================================================================
 # upload data: use "datacleaning_chambers.r" if not yet loaded
 # =============================================================================
-source(here("r scripts", "datacleaning_chambers.r"))
+# source(here("r scripts", "datacleaning_chambers.r"))
 
 # make sure management is in factor form
 chamber_daily_mngmnt$management <- factor(as.character(chamber_daily_mngmnt$management))
@@ -39,14 +39,14 @@ chamber_daily_mngmnt$doy <- yday(chamber_daily_mngmnt$date)
 # for the models to be symmetrical.
 
 table(chamber_daily_mngmnt$management, chamber_daily_mngmnt$crop_stage_simple)
-#               dormant early fallow grain_fill mature reproductive vegetative
-# conventional       0     7      8          9      5            4         12
-# organic            2     2      0          9     14            6         20
+#                 mature dormant early fallow grain_fill reproductive vegetative
+# conventional      5       0     7      8          9            4         12
+# organic          14       2     1      0          9            6         21
 
 # ok so fallow is a 0 for organic in this data, and dormant is a 0 in conventional
 # which means it never even makes it to the model comparison
 # there is a zero in the *interaction* between organic and vegetative, because organic has 
-# 20 veg obs versus conventional's 12...but conventional has 8 obs in fallow. 
+# 21 veg obs versus conventional's 12...but conventional has 8 obs in fallow. 
 # A model including crop stage will try to 'difference' against the 'mature' reference level.
 
 # for this dataset, which is much smaller than the EC data of average fluxes daily,
@@ -144,6 +144,8 @@ simulateResiduals(gam_Rs_drought, plot = TRUE) # model diagnostics look good
 
 # summarize:
 summary(gam_Rs_drought)
+# organic itself does not have a significant effect on Rs compared to conventional,
+# but it's interaction with year does (p = 0.01) as does yaer itself (p < 0.0001)
 
 # residuals vs. fitted colored by year -- to identify systematic discrepancies
 # 2019 in red, 2020 (drought year) in blue
@@ -177,10 +179,6 @@ gls_Rs_drought <- gls(
 )
 
 summary(gls_Rs_drought)
-# imporant interaction:                 Value Std.Error    t-value p-value
-# managementorganic:factor(year)2020  1.550546 16.685630  0.0929270  0.9262
-# not significant, but indicates same magnitude of effect as in uncorrected model
-
 
 # gamm with AR1 -- will estimate phi but with limited precision given block size
 gamm_Rs_drought <- gamm(
@@ -235,10 +233,10 @@ summary(gamm_Rs_drought$gam)
 summary(gam_Rs_drought)
 # Parametric coefficients:
 #                                       Estimate Std. Error t value Pr(>|t|)    
-#   (Intercept)                          1.7707     0.1096  16.159  < 2e-16 ***
-#   managementorganic                    0.1670     0.1571   1.063   0.2907    
-#   factor(year)2020                    -0.7012     0.1673  -4.190 6.82e-05 ***
-#   managementorganic:factor(year)2020   0.5811     0.2274   2.555   0.0124 *  
+# (Intercept)                          1.7707     0.1096  16.159  < 2e-16 ***
+# managementorganic                    0.1670     0.1571   1.063   0.2907    
+# factor(year)2020                    -0.7012     0.1673  -4.190 6.82e-05 ***
+# managementorganic:factor(year)2020   0.5811     0.2274   2.555   0.0124 *   
 #   ---
 #   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 # 
@@ -357,7 +355,7 @@ chamber_daily_mngmnt %>%
 
 # the heteroscedasticity in residuals for the uncorrected final model 
 # may be driven by the fact that NEE variance scales with flux magnitude in 
-# both directions. Try including observation-level weights using your SE column:
+# both directions. Try including observation-level weights using SE column:
 gam_NEE_drought_wtd <- gam(
   NEE_umolm2sec_mean ~
     management * factor(year) +
@@ -408,8 +406,7 @@ summary(gam_NEE_drought_wtd)
 # a greater, more complex relationship with moisture availability -- likely
 # because of greater SOM water retention, more active root/microbial community, etc.
 
-# 3) drought year * management is not significant, which is consistent with the Rs
-# model as well -- as it pertains to the chamber-scale measure of NEE and Rs.
+# 3) drought year * management is not significant
 
 # extract the outputs from the drought model (uncorrected, with notes as above)
 summary(gam_NEE_drought_wtd)$p.table
@@ -631,8 +628,11 @@ emm_combined$response_var <- as.factor(emm_combined$response_var)
 
 # Update custom_labels to match
 custom_labels <- c(
-  ("Ecosystem Respiration" = bquote('Respiration ('*mu~ 'mol' ~CO~ m^-2~s^-1*')')),
-  "NEE" = bquote('NEE ('*mu~ 'mol' ~CO~ m^-2~s^-1*')'))
+  'Ecosystem Respiration' = 'Respiration (\u03BCmol CO m\u207B\u00B2 s\u207B\u00B9)',
+  'NEE' = 'NEE (\u03BCmol CO m\u207B\u00B2 s\u207B\u00B9)'
+)
+
+# Convert to factor
 custom_labels <- as.factor(custom_labels)
 
 p_emm <- ggplot(emm_combined, 
@@ -646,12 +646,12 @@ p_emm <- ggplot(emm_combined,
   geom_hline(yintercept = 0, linetype = "dashed", color = "gray40") +
   facet_wrap(~ response_var,
              scales = "free_y",
-             labeller = labeller(response_var = c(
-               "Ecosystem Respiration" = expression(paste('Respiration ('*mu~ 'mol' ~CO~ m^-2~s^-1*')')),
-               "NEE" = expression(paste('NEE ('*mu~ 'mol' ~CO~ m^-2~s^-1*')'))
-             ))) +
+             # labeller = labeller(response_var = c(
+               # "Ecosystem Respiration" = expression(paste('Respiration ('*mu~ 'mol' ~CO~ m^-2~s^-1*')')),
+               # "NEE" = expression(paste('NEE ('*mu~ 'mol' ~CO~ m^-2~s^-1*')'))
+             # ))) +
              # labeller = label_parsed)+
-             # labeller = labeller(custom_labels))+
+             labeller = labeller(custom_labels))+
   scale_color_manual(values = c("Conventional" = "#E05C5C", 
                                 "Organic"      = "#C49A00")) +
   labs(x = NULL, y = "Estimated marginal mean flux",

@@ -1,0 +1,150 @@
+{
+  "schema": {
+    "domains": [],
+    "fields": [
+      {
+        "name": "Name",
+        "shortname": "Name",
+        "alias": "Name",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "descriptio",
+        "shortname": "descriptio",
+        "alias": "descriptio",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "timestamp",
+        "shortname": "timestamp",
+        "alias": "timestamp",
+        "type": "esriFieldTypeString",
+        "length": 24,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "begin",
+        "shortname": "begin",
+        "alias": "begin",
+        "type": "esriFieldTypeString",
+        "length": 24,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "end",
+        "shortname": "end",
+        "alias": "end",
+        "type": "esriFieldTypeString",
+        "length": 24,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "altitudeMo",
+        "shortname": "altitudeMo",
+        "alias": "altitudeMo",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      },
+      {
+        "name": "tessellate",
+        "shortname": "tessellate",
+        "alias": "tessellate",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "points_tessellate_82d855dd-bee0-4e25-bbe9-c2955a923cf1",
+        "defaultValue": null
+      },
+      {
+        "name": "extrude",
+        "shortname": "extrude",
+        "alias": "extrude",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "points_extrude_36123556-bed2-45cd-83fd-678df8abe5a4",
+        "defaultValue": null
+      },
+      {
+        "name": "visibility",
+        "shortname": "visibility",
+        "alias": "visibility",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "points_visibility_ea5d7d54-d4b4-40d4-b79d-3b8a32d9f7b1",
+        "defaultValue": null
+      },
+      {
+        "name": "drawOrder",
+        "shortname": "drawOrder",
+        "alias": "drawOrder",
+        "type": "esriFieldTypeInteger",
+        "length": 4,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": "points_drawOrder_19108e53-1d56-4424-86b0-88ddd7055a3b",
+        "defaultValue": null
+      },
+      {
+        "name": "icon",
+        "shortname": "icon",
+        "alias": "icon",
+        "type": "esriFieldTypeString",
+        "length": 254,
+        "nullable": true,
+        "editable": true,
+        "required": false,
+        "heritable": false,
+        "domain": null,
+        "defaultValue": null
+      }
+    ]
+  }
+}

@@ -1051,8 +1051,8 @@ create_management_vars_multicrop <- function(data, events) {
         crop_stage %in% c("vegetative", "vegetative_early", "vegetative_rapid",
                           "tillering", "growth", "regrowth") ~
           "vegetative",
-        # Cover crop active phases (includes fall hardening - resource allocation to roots)
-        crop_stage %in% c("fall tillering", "fall hardening", "rapid growth") ~
+        # Cover crop active phases
+        crop_stage %in% c("fall tillering", "rapid growth") ~
           "vegetative",
         # Alfalfa/perennial: shoot elongation during rapid growth
         crop_stage %in% c("shoot_elongation", "rapid growth") ~
@@ -1076,7 +1076,7 @@ create_management_vars_multicrop <- function(data, events) {
           "grain_fill",
 
         # ---- Mature / senescence ----
-        crop_stage %in% c("maturity", "mature_growth", "mature", "senescence") ~
+        crop_stage %in% c("maturity", "mature_growth", "fall hardening", "mature", "senescence") ~
           "mature",
 
         # ---- Dormant ----
@@ -1133,3 +1133,4 @@ create_management_vars_multicrop <- function(data, events) {
 # ec_daily_mngmnt <- create_management_vars_multicrop(
   # ec_daily_avg,
   # mngmnt) 
+

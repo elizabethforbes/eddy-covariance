@@ -159,15 +159,3 @@ y_table <- flextable(yield_data) %>%
   
 y_table
 
-# ============================================================================
-# map of soil core sampling locations
-# ============================================================================
-
-library(sf)
-library(maptools)
-
-# upload locations: xy coords
-loc <- readxl::read_xlsx(here("eddy_covariance_fluxdata", "2015-2020_Nitrogen_Results.xlsx"), sheet = 10)
-# base map:
-us_states <- ne_states(country = "United States of America", returnclass = "sf")
-
