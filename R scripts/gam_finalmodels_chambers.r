@@ -662,3 +662,87 @@ p_emm <- ggplot(emm_combined,
         strip.text = element_text(face = "bold"))
 
 p_emm
+
+##################################################################
+# TABLES
+##################################################################
+
+library(gtsummary)
+library(broom)
+library(flextable)
+# set theme to compact: reduces row padding, font size
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# table of results for Reco analysis:
+ch_eco_tab <- 
+  tbl_regression(
+    gam_Rs_drought,
+    exponentiate = FALSE,
+    conf.int = TRUE) %>% 
+  add_significance_stars(
+    hide_ci = TRUE, hide_se = FALSE,
+    hide_p = FALSE,
+    pattern = "{p.value}{stars}"
+  ) %>% 
+  remove_row_type(type = "reference") %>% 
+  italicize_levels() %>% bold_labels() %>% 
+  modify_header(estimate~"**Estimate**") %>% 
+  # update level names for the interactions
+  modify_table_body(~ .x %>% 
+                      dplyr::mutate(
+                        label = dplyr::recode(label, 
+                                              "factor(year)" = "year",
+                                              "management * factor(year)" = "management * year",
+                                              "s(soilm_perc_mean):managementconventional" = "s(% soil moisture * conventional)",
+                                              "s(soilm_perc_mean):managementorganic" = "s(% soil moisture * organic)")
+                      ))
+# remove footnotes:
+ch_eco_tab$table_styling$abbreviation <- 
+  ch_eco_tab$table_styling$abbreviation %>% 
+  dplyr::filter(column != c("conf.low", "std.error"))
+# ch_eco_tab <- 
+#   ch_eco_tab %>% 
+#   modify_caption("**Predictors of respiration (chamber-based)**") %>% 
+#   as_gt()
+
+# NEE:
+ch_nee_tab <- 
+  tbl_regression(
+    gam_NEE_drought_wtd,
+    exponentiate = FALSE,
+    conf.int = TRUE) %>% 
+  add_significance_stars(
+    hide_ci = TRUE, hide_se = FALSE,
+    hide_p = FALSE,
+    pattern = "{p.value}{stars}"
+  ) %>% 
+  remove_row_type(type = "reference") %>% 
+  italicize_levels() %>% bold_labels() %>% 
+  modify_header(estimate~"**Estimate**") %>% 
+  # update level names for the interactions
+  modify_table_body(~ .x %>% 
+                      dplyr::mutate(
+                        label = dplyr::recode(label, 
+                                              "factor(year)" = "year",
+                                              "management * factor(year)" = "management * year",
+                                              "s(soilm_perc_mean):managementconventional" = "s(% soil moisture * conventional)",
+                                              "s(soilm_perc_mean):managementorganic" = "s(% soil moisture * organic)")
+                      ))
+# remove footnotes:
+ch_nee_tab$table_styling$abbreviation <- 
+  ch_nee_tab$table_styling$abbreviation %>% 
+  dplyr::filter(column != c("conf.low", "std.error"))
+# ch_nee_tab <- 
+  # ch_nee_tab %>% 
+  # modify_caption("**Predictors of NEE (chamber-based)**") %>% 
+  # as_gt()
+
+# combine:
+tbl_merge(
+  tbls = list(ch_eco_tab, ch_nee_tab),
+  tab_spanner = c(
+    "**Respiration**", "**NEE**")
+) %>% 
+  bold_labels() %>% 
+  modify_caption("**Predictors of fluxes (chamber-based)**") %>% 
+  as_gt()

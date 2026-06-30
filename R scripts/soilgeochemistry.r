@@ -44,38 +44,24 @@ my_custom_theme <- function() {
 som <- readxl::read_xlsx(here("eddy_covariance_fluxdata", 
                               "EF0_LOI (2020, EF01 & EF02).xlsx"), sheet = 2)
 
-# summarize:
-som_summ <- som %>% 
-  group_by(management, field_replicate, sample_location, sample_depth_cm) %>% 
-  summarize(across(where(is.numeric), mean, na.rm = TRUE)) %>% 
-  select(!c(sample_replicate)) %>% 
-  mutate(core_id = paste(julian_date, management, field_replicate, sample_location),
-         management = factor(management, levels = c("conventional", "organic")))
+# rename "sample_depth_cm" to "section_depth_cm" for table merging later
+som <- som %>% 
+  rename(section_depth_cm = sample_depth_cm)
 
-# summarize to 1m using bulk density:
-som_summ <- som_summ %>% 
-  left_join(bd, by = join_by(management, 
-                             field_replicate == replicate,
-                             sample_location == location,
-                             sample_depth_cm == depth_cm)) 
-som_summ <- som_summ %>% 
-  mutate(mass_somsample = S_BD_gcm3.x * volume_layer.x, # volume in cm3 for each 3" by 10cm segment, bulk density of sieved soil
-         weighted_som = (OM_perc/100) * mass_somsample) # get SOM in mass by multiplying %som against mass of sample in that layer
-
-weighted_avg_som <- som_summ %>% 
-  # filter out depths > 80cm
-  filter(sample_depth_cm < 80) %>% 
-  group_by(management, field_replicate, sample_location) %>% 
-  summarise(
-    total_weighted_som = sum(weighted_som, na.rm = TRUE),
-    total_mass = sum(mass_somsample, na.rm = TRUE),
-    somperc_avg_80cm = (total_weighted_som/total_mass)*100
-  ) %>% 
-  select(total_weighted_som, total_mass, somperc_avg_80cm, management)
+# summarize: average the 4 LOI replicate subsamples per depth, per core
+som_dat <- som %>% 
+  filter(section_depth_cm <= 70) %>% 
+  group_by(management, field_replicate, sample_location, section_depth_cm) %>% 
+  summarize(
+    OM_perc = mean(OM_perc, na.rm = TRUE),
+    .groups = "drop") %>% 
+  mutate(
+    management = factor(management, levels = c("conventional", "organic")),
+    core_id = paste(management, field_replicate, sample_location, sep = "_"))
 
 # initial plot:
-p_som <- som_summ %>% 
-  ggplot(aes(x = factor(sample_depth_cm), y = OM_perc, fill = management)) +
+p_som <- som_dat %>% 
+  ggplot(aes(x = factor(section_depth_cm), y = OM_perc, fill = management)) +
   geom_boxplot(position = position_dodge(width = 0.8), color = "black", alpha = 0.5) +
   geom_jitter(aes(color = management), 
               position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8), 
@@ -88,43 +74,33 @@ p_som <- som_summ %>%
 p_som
 # theme_minimal()
 
-# model differences by treatment, 80cm OM
-som_mod <- lm(somperc_avg_80cm ~ management, data = weighted_avg_som)
-anova(som_mod)
-# Response: somperc_avg_80cm
-#             Df  Sum Sq Mean Sq F value Pr(>F)  
-# management  1 0.43064 0.43064  4.6119 0.0573 .
-# Residuals  10 0.93376 0.09338                        
-
-summary(som_mod)# Residuals:
-#   Min       1Q   Median       3Q      Max 
-# -0.35268 -0.15632 -0.06239  0.08847  0.59234 
-# 
-# Coefficients:
+# model differences by treatment, 10cm increments to 70cm
+# GAMM with management-specific smooths
+# random effect for core (replicate/location) to account for nesting
+som_gamm <- gamm(OM_perc ~ management +
+                   s(section_depth_cm, by = management, k = 5),
+                 random = list(core_id = ~1),
+                 data = som_dat)
+summary(som_gamm$gam)
+# Parametric coefficients:
 #                       Estimate Std. Error t value Pr(>|t|)    
-#   (Intercept)         1.4612     0.1248  11.713 3.67e-07 ***
-#   managementorganic   0.3789     0.1764   2.148   0.0573 .  
+#   (Intercept)         1.6273     0.1224  13.296   <2e-16 ***
+#   managementorganic   0.3483     0.1731   2.012   0.0476 *  
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 # 
-# Residual standard error: 0.3056 on 10 degrees of freedom
-# Multiple R-squared:  0.3156,	Adjusted R-squared:  0.2472 
-# F-statistic: 4.612 on 1 and 10 DF,  p-value: 0.0573
+# Approximate significance of smooth terms:
+#                                               edf Ref.df     F p-value    
+#   s(section_depth_cm):managementconventional 2.003  2.003 153.6  <2e-16 ***
+#   s(section_depth_cm):managementorganic      1.000  1.000 197.8  <2e-16 ***
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# R-sq.(adj) =  0.751   
+# Scale est. = 0.071954  n = 84
 
-DHARMa::plotQQunif(som_mod)
-DHARMa::plotResiduals(som_mod)
-
-# plot of core-level OM concentration:
-weighted_avg_som %>%
-  ggplot(aes(x = management, y = somperc_avg_80cm, fill = management)) +
-  # geom_violin(alpha = 0.5, color = NA) +
-  geom_boxplot(color = "black", alpha = 0.7, outlier.shape = NA) +
-  geom_jitter(aes(color = management),
-              position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8),
-              size = 4, alpha = 0.8) +
-  scale_fill_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  scale_color_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  labs(x = NULL, y = "Organic matter content to 80cm (%)") +
-  my_custom_theme()+
-  theme(legend.position = "none")
+# plot the smooth terms:
+gratia::draw(som_gamm$gam) & theme_classic() 
 
 # ============================================================================
 # Bulk density: 2mm (fine fraction)
@@ -233,7 +209,7 @@ stocks_summ <- sn %>%
 # Profile plot: stocks by depth and management
 p_cdepths <- sn %>% 
   # filter out the 75cm depth section:
-  filter(section_depth_cm != 75) %>% 
+  filter(section_depth_cm <= 70) %>% 
   ggplot(aes(y = stockC_kgm2, x = as.factor(section_depth_cm), fill = management)) +
   geom_boxplot(position = position_dodge(width = 0.8), color = "black", alpha = 0.5) +
   geom_jitter(aes(color = management), 
@@ -248,7 +224,7 @@ p_cdepths <- sn %>%
 
 p_ndepths <- sn %>% 
   # filter out the 75cm depth section:
-  filter(section_depth_cm != 75) %>% 
+  filter(section_depth_cm <= 70) %>% 
   ggplot(aes(y = stockN_kgm2, x = as.factor(section_depth_cm), fill = management)) +
   geom_boxplot(position = position_dodge(width = 0.8), color = "black", alpha = 0.5) +
   geom_jitter(aes(color = management), 
@@ -262,34 +238,6 @@ p_ndepths <- sn %>%
   my_custom_theme()
 
 p_cdepths + p_ndepths
-
-# Total stocks boxplot by management
-p_cstock <- 
-  ggplot(stocks_summ, aes(x = management, y = Cstock_kgm2_70cm, fill = management)) +
-  geom_boxplot(color = "black", alpha = 0.5) +
-  geom_jitter(aes(color = management))+
-  scale_fill_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  scale_color_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  labs(y = "Total Carbon Stock (kg/m² to 0.7m)",
-       x = element_blank()) +
-  my_custom_theme()+
-  theme(legend.position = "none")
-
-p_nstock <- 
-  ggplot(stocks_summ, aes(x = management, y = Nstock_kgm2_70cm, fill = management)) +
-  geom_boxplot(color = "black", alpha = 0.5) +
-  geom_jitter(aes(color = management))+
-  scale_fill_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  scale_color_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  labs(y = "Total Nitrogen Stock (kg/m² to 0.7m)",
-       x = element_blank()) +
-  my_custom_theme()+
-  theme(legend.position = "none")
-
-p_cstock
-p_nstock
-
-p_cstock + p_nstock 
 
 # ============================================================================
 # model: comparison of C, N stocks by management
@@ -350,3 +298,171 @@ summary(ns_mod)
 # Residual standard error: 0.07733 on 10 degrees of freedom
 # Multiple R-squared:  0.3756,	Adjusted R-squared:  0.3131 
 # F-statistic: 6.014 on 1 and 10 DF,  p-value: 0.03412
+
+# ============================================================================
+# model: comparison of C, N stocks by management AND by sample depth
+# ============================================================================
+
+sn_mod <- sn %>%
+  filter(section_depth_cm <= 70) %>%
+  mutate(
+    management = factor(management, levels = c("conventional", "organic")),
+    core_id = paste(management, replicate, location, sep = "_")
+  )
+
+# verify
+class(sn_mod$management)  # should be "factor"
+levels(sn_mod$management) # should show both levels
+
+# carbon stocks by depth:
+c_gamm <- gamm(stockC_kgm2 ~ management +
+                 s(section_depth_cm, by = management, k = 5),
+               random = list(core_id = ~1),
+               data = sn_mod)
+
+summary(c_gamm$gam)
+#   Parametric coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+#   (Intercept)        0.72390    0.06258  11.568   <2e-16 ***
+#   managementorganic  0.17327    0.08850   1.958   0.0539 .  
+# ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Approximate significance of smooth terms:
+#                                               edf   Ref.df    F   p-value    
+#   s(section_depth_cm):managementconventional 2.681  2.681  95.54  <2e-16 ***
+#   s(section_depth_cm):managementorganic      3.174  3.174 104.53  <2e-16 ***
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# R-sq.(adj) =  0.818   
+# Scale est. = 0.032831  n = 84
+
+gratia::draw(c_gamm$gam) & theme_bw()
+gam.check(c_gamm$gam)
+
+# nitrogen stocks by depth:
+n_gamm <- gamm(stockN_kgm2 ~ management +
+                 s(section_depth_cm, by = management, k = 5),
+               random = list(core_id = ~1),
+               data = sn_mod)
+
+summary(n_gamm$gam)
+#   Parametric coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+#   (Intercept)       0.096455   0.004167  23.147  < 2e-16 ***
+#   managementorganic 0.015642   0.005893   2.654  0.00966 ** 
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Approximate significance of smooth terms:
+#                                               edf   Ref.df     F p-value    
+#   s(section_depth_cm):managementconventional 1.739  1.739 91.53  <2e-16 ***
+#   s(section_depth_cm):managementorganic      3.597  3.597 94.95  <2e-16 ***
+#   ---
+#   Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# R-sq.(adj) =  0.826   
+# Scale est. = 0.00023259  n = 84
+
+gratia::draw(n_gamm$gam) & theme_bw()
+gam.check(n_gamm$gam)
+
+# ============================================================================
+# TABLES
+# ============================================================================
+
+library(gtsummary)
+library(flextable)
+# set theme to compact: reduces row padding, font size
+set_gtsummary_theme(theme_gtsummary_compact(set_theme = TRUE))
+
+# table of results for SOM analysis:
+SOM_tab <- 
+  tbl_regression(
+  som_gamm$gam,
+  exponentiate = FALSE,
+  conf.int = TRUE) %>% 
+  add_significance_stars(
+    hide_ci = TRUE, hide_se = FALSE,
+    hide_p = FALSE,
+    pattern = "{p.value}{stars}"
+  ) %>% 
+  italicize_levels() %>% bold_labels() %>% 
+  modify_header(estimate~"**Estimate**") %>% 
+  # update level names for the interactions
+  modify_table_body(~ .x %>% 
+                      dplyr::mutate(
+                        label = dplyr::recode(label, "s(section_depth_cm):managementconventional" = "sample depth * conventional",
+                                              "s(section_depth_cm):managementorganic" = "sample depth * organic")
+                      ))
+# remove footnotes:
+SOM_tab$table_styling$abbreviation <- 
+  SOM_tab$table_styling$abbreviation %>% 
+  dplyr::filter(column != c("conf.low", "std.error"))
+SOM_tab %>% 
+  modify_caption("**SOM concentration by management and depth (10cm increments to 70cm)**") %>% 
+  as_gt()
+
+# make side-by-side table for C and N stocks
+# helper function:
+make_tbl <- function(model) {
+  tbl_regression(
+    model,
+    exponentiate = FALSE,
+    conf.int     = TRUE
+  ) |>
+    add_significance_stars(
+      hide_ci  = TRUE,
+      hide_se  = FALSE,
+      hide_p = FALSE,
+      pattern  = "{p.value}{stars}"
+    ) |>
+    italicize_levels() %>% 
+    remove_row_type(type = "reference") |>
+    modify_header(estimate ~ "**Estimate**", std.error ~ "**SE**")
+}
+
+Cstock_tab <- make_tbl(c_gamm$gam)
+Nstock_tab <- make_tbl(n_gamm$gam)
+
+
+# update level names for the interactions
+Cstock_tab <- 
+  Cstock_tab %>% 
+  modify_table_body(~ .x %>% 
+      dplyr::mutate(
+        label = dplyr::recode(label, "s(section_depth_cm):managementconventional" = "sample depth * conventional",
+                          "s(section_depth_cm):managementorganic" = "sample depth * organic")))
+Nstock_tab <- 
+  Nstock_tab %>% 
+  modify_table_body(~ .x %>% 
+                      dplyr::mutate(
+                        label = dplyr::recode(label, "s(section_depth_cm):managementconventional" = "sample depth * conventional",
+                                              "s(section_depth_cm):managementorganic" = "sample depth * organic")))
+# Remove footnotes
+Cstock_tab$table_styling$abbreviation <- 
+  Cstock_tab$table_styling$abbreviation %>% 
+  dplyr::filter(column != c("conf.low", "std.error"))
+Nstock_tab$table_styling$abbreviation <- 
+  Nstock_tab$table_styling$abbreviation %>% 
+  dplyr::filter(column != c("conf.low", "std.error"))
+
+# combine:
+tbl_merge(
+  tbls = list(Cstock_tab, Nstock_tab),
+  tab_spanner = c(
+    "**Carbon stocks**", "**Nitrogen stocks**")
+) %>% 
+  bold_labels() %>% 
+  modify_caption("**Predictors of C, N stocks by field management and sample depth**") %>% 
+  as_gt()
+
+# combine with SOM table, too:
+tbl_merge(
+  tbls = list(SOM_tab, Cstock_tab, Nstock_tab),
+  tab_spanner = c("**SOM content**", "**C stocks**", "**N stocks**")
+  ) %>% 
+  bold_labels() %>% 
+  modify_caption("**Predictors of SOM content, carbon and nitrogen stocks by management and depth**") %>% 
+  as_gt()

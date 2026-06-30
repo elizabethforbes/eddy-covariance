@@ -1059,6 +1059,7 @@ print(p_data_avail)
 # --- Render all plots --------------------------------------------------------
 print(p_cumNEE)
 print(p_cumNECB)
+print(p_cumNEE + p_cumNECB) # side by side via patchwork
 print(p_annual_nee + p_annual_necb)   # side by side via patchwork
 # side by side, and edited y-axis:
 print((p_annual_nee+ylim(-400,600))+(p_annual_necb+ylim(-400,600)+labs(subtitle = element_blank())))
