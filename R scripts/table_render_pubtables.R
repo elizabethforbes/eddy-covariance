@@ -20,9 +20,11 @@
 library(flextable)
 library(officer)
 library(dplyr)
+library(here)
+library(patchwork)
 
 # Source the data layer (adjust path as needed)
-source("table_EC_pubtables.R")
+source(here("R scripts", "table_EC_pubtables.R"))
 
 
 # -----------------------------------------------------------------------------
@@ -354,9 +356,9 @@ ft_reco_smooth # make 450 x 415
 ft_all_main <- render_combined_stats_ft(results$combined_stats)
 ft_all_main
 
-#########
+################################################################################
 # chamber
-#########
+################################################################################
 
 results_ch <- make_all_pub_tables(
   models = list(
@@ -366,13 +368,8 @@ results_ch <- make_all_pub_tables(
   ),
   keep_terms     = c("Intercept", "Organic"),
   sig_threshold  = 0.10,
-  decimals       = 3,
-  r2_notes       = c(
-    Reco = paste0("GAMM R² inflated by ARMA(1,1) correlation structure ",
-                  "(fitted-value variance > observed); use CCC = 0.631 ",
-                  "(95% CI 0.595-0.664) instead.")
-  )
-)
+  decimals       = 3)
+
 
 # NEE
 ft_nee_ch <- render_parametric_ft(
@@ -405,3 +402,68 @@ ft_reco_smooth <- render_smooth_ft(
   fit_stats_lines = .fit_stats_footer(results_ch$per_model$Reco$model_stats)
 )
 ft_reco_smooth # make 450 x 415
+
+################################################################################
+# soil chemistry model results
+################################################################################
+
+# som_gamm, c_gamm, and n_gamm
+
+results_soil <- make_all_pub_tables(
+  models = list(
+    NEE  = som_gamm,
+    GPP  = c_gamm,
+    Reco = n_gamm
+  ),
+  keep_terms     = c("Intercept", "Organic"),
+  sig_threshold  = 0.10,
+  decimals       = 3)
+
+
+# organic matter:
+ft_som <- render_parametric_ft(
+  results_soil$per_model$NEE$main_parametric,
+  caption = "Selected coefficients: SOM concentration",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$NEE$model_stats)
+)
+ft_som   # preview in RStudio Viewer, make 450 x 415
+# # flextable::save_as_image(ft_nee_main, path = "ft_nee_main.png")
+
+ft_som_smooth <- render_smooth_ft(
+  results_soil$per_model$NEE$smooth_terms,
+  caption = "Selected smooth terms: SOM concentration",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$NEE$model_stats)
+)
+ft_som_smooth # make 450 x 415
+
+# C stock
+ft_c <- render_parametric_ft(
+  results_soil$per_model$GPP$main_parametric,
+  caption = "Selected coefficients: Carbon stock",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$GPP$model_stats)
+)
+ft_c   # preview in RStudio Viewer, make 450 x 415
+# # flextable::save_as_image(ft_nee_main, path = "ft_nee_main.png")
+
+ft_c_smooth <- render_smooth_ft(
+  results_soil$per_model$GPP$smooth_terms,
+  caption = "Selected smooth terms: Carbon stock",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$GPP$model_stats)
+)
+ft_c_smooth # make 450 x 415
+
+# N stock
+ft_n <- render_parametric_ft(
+  results_soil$per_model$Reco$main_parametric,
+  caption = "Selected coefficients: Nitrogen stock",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$Reco$model_stats)
+)
+ft_n   # preview in RStudio Viewer, make 450 x 415
+# # flextable::save_as_image(ft_nee_main, path = "ft_nee_main.png")
+
+ft_n_smooth <- render_smooth_ft(
+  results_soil$per_model$Reco$smooth_terms,
+  caption = "Selected smooth terms: Nitrogen stock",
+  fit_stats_lines = .fit_stats_footer(results_soil$per_model$Reco$model_stats)
+)
+ft_n_smooth # make 450 x 415

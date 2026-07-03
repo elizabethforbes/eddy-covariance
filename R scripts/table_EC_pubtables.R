@@ -237,31 +237,31 @@ make_all_pub_tables <- function(models,
 }
 
 
-# =============================================================================
-# Example usage (uncomment to run)
-# =============================================================================
-#
-results <- make_all_pub_tables(
-  models = list(
-    NEE  = bam_NEE,
-    GPP  = bam_GPP,
-    Reco = gamm_Reco_smoothed
-  ),
-  keep_terms     = c("Intercept", "Organic"),
-  sig_threshold  = 0.10,
-  decimals       = 3,
-  r2_notes       = c(
-    Reco = paste0("GAMM R^2 inflated by ARMA(1,1) correlation structure ",
-                  "(fitted-value variance > observed). Use CCC = 0.631 ",
-                  "(95% CI 0.595-0.664) instead.")
-  ),
-  output_dir = "tables/"
-)
-
-# Access any table directly:
-results$per_model$NEE$main_parametric
-results$per_model$NEE$smooth_terms
-results$combined_stats
+# # =============================================================================
+# # Example usage (uncomment to run)
+# # =============================================================================
+# #
+# results <- make_all_pub_tables(
+#   models = list(
+#     NEE  = bam_NEE,
+#     GPP  = bam_GPP,
+#     Reco = gamm_Reco_smoothed
+#   ),
+#   keep_terms     = c("Intercept", "Organic"),
+#   sig_threshold  = 0.10,
+#   decimals       = 3,
+#   r2_notes       = c(
+#     Reco = paste0("GAMM R^2 inflated by ARMA(1,1) correlation structure ",
+#                   "(fitted-value variance > observed). Use CCC = 0.631 ",
+#                   "(95% CI 0.595-0.664) instead.")
+#   ),
+#   output_dir = "tables/"
+# )
+# 
+# # Access any table directly:
+# results$per_model$NEE$main_parametric
+# results$per_model$NEE$smooth_terms
+# results$combined_stats
 #
 # # Or pass to gt / flextable for rendering later:
 # gt::gt(results$per_model$NEE$main_parametric)

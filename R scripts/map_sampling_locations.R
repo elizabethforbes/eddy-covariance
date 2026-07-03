@@ -141,48 +141,71 @@ core_col     <- "#d95f02"   # orange  — soil cores
 tower_col    <- "#1b9e77"   # teal    — EC tower
 
 # ── make map panels, then stitch together ───────────────────────────────
+
+# function to reproject points relative to their tower
+make_relative <- function(pts_sf, tower_sf) {
+  # get tower coordinates as the origin
+  tower_coords <- st_coordinates(tower_sf)
+  tower_lon    <- tower_coords[1]
+  tower_lat    <- tower_coords[2]
+  
+  # create a local azimuthal equidistant projection centred on the tower
+  # this gives metres N/S and E/W from the tower
+  local_crs <- sprintf(
+    "+proj=aeqd +lat_0=%f +lon_0=%f +units=m",
+    tower_lat, tower_lon
+  )
+  
+  st_transform(pts_sf, crs = local_crs)
+}
+
+# reproject everything to local coordinates for each field
+org_tower    <- towers_sf %>% filter(management == "organic")
+conv_tower   <- towers_sf %>% filter(management == "conventional")
+
+org_cores_rel    <- make_relative(cores_sf_nyeast %>% filter(management == "organic"),   org_tower)
+org_collars_rel  <- make_relative(org_collars_sf,   org_tower)
+org_tower_rel    <- make_relative(org_tower,         org_tower)
+
+conv_cores_rel   <- make_relative(cores_sf_nyeast %>% filter(management == "conventional"), conv_tower)
+conv_collars_rel <- make_relative(conv_collars_sf,   conv_tower)
+conv_tower_rel   <- make_relative(conv_tower,         conv_tower)
+
 make_panel <- function(panel_title,
                        cores_data,
                        collars_data,
-                       buf,
                        tower_data,
+                       x_range_m,   # shared geographic window in metres
+                       y_range_m,
                        show_legend = FALSE) {
   
-  # Bounding box from all points
-  all_pts <- bind_rows(cores_data, collars_data, tower_data)
-  bbox <- st_bbox(all_pts)
+  # centre on tower (which is at 0,0 in local CRS)
+  xlim <- c(-x_range_m / 2, x_range_m / 2)
+  ylim <- c(-y_range_m / 2, y_range_m / 2)
   
-  xlim <- c(bbox["xmin"] - buf
-            , bbox["xmax"] + buf) 
-  ylim <- c(bbox["ymin"] - buf
-            , bbox["ymax"] + buf) 
-
-  # Calculate the aspect ratio based on the data extents
   aspect_ratio <- diff(xlim) / diff(ylim)
   
   p <- ggplot() +
     
-    # Soil cores
     geom_sf(data = cores_data,
             colour = core_col, fill = core_col,
             shape = 21, size = 1) +
     
-    # Collars
     geom_sf(data = collars_data,
             colour = collar_col,
             shape = 1, size = 1, stroke = 1.0) +
     
-    # EC tower
     geom_sf(data = tower_data,
             colour = tower_col,
-            shape = 13, size = 3, stroke = 1.0) +
+            shape = 8, size = 3, stroke = 1.0) +
     
-    # Panel title as annotation
+    # axis labels in metres from tower
+    scale_x_continuous(labels = function(x) paste0(x, " m")) +
+    scale_y_continuous(labels = function(x) paste0(x, " m")) +
+    
     annotate("text",
-             # x = xlim + 0.05 * diff(xlim),
-             # y = ylim - 0.05 * diff(ylim),
-             x = xlim + 0.05,
-             y = ylim + 0.05,
+             x = xlim[1] + 0.05 * diff(xlim),
+             y = ylim[2] - 0.05 * diff(ylim),
              label = panel_title,
              hjust = 0, vjust = 1,
              size = 4, fontface = "bold") +
@@ -196,34 +219,45 @@ make_panel <- function(panel_title,
       axis.title       = element_blank(),
       panel.grid.major = element_line(colour = "grey85", linewidth = 0.25),
       legend.position  = if (show_legend) "bottom" else "none",
-      aspect.ratio     = aspect_ratio  # Enforce consistent panel dimensions
+      aspect.ratio     = aspect_ratio
     )
   
-
+  p
 }
 
-BUFFER  <- .0008
-# metres of padding around each panel extent
+# calculate shared window size from whichever field is more spread out
+all_org_coords  <- st_coordinates(bind_rows(org_cores_rel, 
+                                            org_collars_rel, 
+                                            org_tower_rel))
+all_conv_coords <- st_coordinates(bind_rows(conv_cores_rel,
+                                            conv_collars_rel,
+                                            conv_tower_rel))
 
-# Create panels with consistent dimensions
+x_range_m <- max(diff(range(all_org_coords[,1])),
+                 diff(range(all_conv_coords[,1]))) * 1.5  # 1.5x for padding
+y_range_m <- max(diff(range(all_org_coords[,2])),
+                 diff(range(all_conv_coords[,2]))) * 1.5
+
+# build panels
 org <- make_panel(
-  panel_title = "Organic field",
-  cores_data = cores_sf_nyeast %>% filter(management == "organic"),
-  collars_data = org_collars_sf,
-  tower_data = towers_sf %>% filter(management == "organic"),
-  buf = BUFFER
+  panel_title  = "Organic field",
+  cores_data   = org_cores_rel,
+  collars_data = org_collars_rel,
+  tower_data   = org_tower_rel,
+  x_range_m    = x_range_m,
+  y_range_m    = y_range_m
 ) + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
-
 
 conv <- make_panel(
-  panel_title = "Conventional field",
-  cores_data   = cores_sf_nyeast %>% filter(management == "conventional"),
-  collars_data = conv_collars_sf,
-  tower_data   = towers_sf %>% filter(management == "conventional"),
-  buf = BUFFER
+  panel_title  = "Conventional field",
+  cores_data   = conv_cores_rel,
+  collars_data = conv_collars_rel,
+  tower_data   = conv_tower_rel,
+  x_range_m    = x_range_m,
+  y_range_m    = y_range_m
 ) + theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
 
-# Combine panels
 combined_plot <- org + conv
 print(combined_plot)
+
 
