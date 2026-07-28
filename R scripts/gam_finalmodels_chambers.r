@@ -214,7 +214,7 @@ summary(gamm_Rs_drought$gam)
 # short to accommodate all that complexity, resulting in inflated phi.
 # 
 
-# USE THE UNCORRECTED MODEL and state clearly: "We observed residual autocorrelation
+# USE THE UNCORRECTED MODEL with something like: "We observed residual autocorrelation
 # in the management*year blocks (0.35-0.45 ACF lag-1), indicating that SE's from the 
 # final GAM were optimistic. an Ar(1)-corrected model (gamm with corAR1) yielded
 # directionally-consistent estimates (interaction beta = 0.59), but largely attenuated

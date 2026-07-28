@@ -110,40 +110,6 @@ gratia::draw(som_gamm$gam) & theme_classic()
 # bd <- readxl::read_xlsx(here("eddy_covariance_fluxdata", "Bulk Density Fall 2020.xlsx"), sheet = 3)
 sn <- readxl::read_xlsx(here("eddy_covariance_fluxdata", "2015-2020_Nitrogen_Results.xlsx"), sheet = 9)
 
-# summarize:
-bd_summ <- sn %>% 
-  filter(section_depth_cm <= 70) %>% # filter to the deepest consistently-sampled depth: 70cm
-  group_by(management, replicate, location) %>% 
-  summarise(
-    finemass_g_70cm = sum(bd_under2mm_gcm3 * section_vol_cm3, na.rm = TRUE), # calculate mass of each section's fine fraction
-    volume_core = sum(section_vol_cm3, na.rm = TRUE), # calculate the volume of the core to 70cm; should be identical
-    max_depth = n() * 10,
-    .groups = "drop_last") %>% 
-  mutate(
-    bd_70cmcore_fine_gcm3 = finemass_g_70cm / volume_core,
-    management = factor(management, levels = c("conventional", "organic"))
-  )
-
-# initial plot:
-bd_summ %>%
-  # indicate whether a core is less than 1m in depth:
-  # mutate(depth_category = if_else(max_depth_cm < 100, "<1m", "=1m")) %>%
-  ggplot(aes(x = management, y = bd_70cmcore_fine_gcm3, fill = management)) +
-  geom_violin(alpha = 0.5, color = NA) +
-  geom_boxplot(width = 0.1, color = "black", alpha = 0.7, outlier.shape = NA) +
-  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "white") +
-  # indicate depth disparity with shape:
-  geom_jitter(aes(color = management),
-              position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.8),
-              size = 4, alpha = 0.8) +
-  # scale_fill_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  scale_fill_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  scale_color_manual(values = c("conventional" = "tomato", "organic" = "#E69F00")) +
-  # scale_shape_manual(values = c("<1m" = 17, "=1m" = 16)) +  # triangles for <1m, circles for ≥1m
-  labs(x = NULL, y = "Bulk Density to 70cm (g/cm³)") +
-  my_custom_theme()+
-  theme(legend.position = "none")
-
 # plot with 10cm increments:
 sn %>%
   # filter out the 75cm depth section:

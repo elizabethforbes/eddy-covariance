@@ -1,5 +1,21 @@
 {
     "debugBreakpointsState": {
-        "breakpoints": []
+        "breakpoints": [
+            {
+                "id": 0,
+                "path": "~/Documents/Hudson Carbon/eddy covariance/R scripts/merge_management_data_covercropsandperennials_v3_6_0_6.r",
+                "line_number": 507,
+                "function_steps": "",
+                "function_name": "assign_alfalfa_stages",
+                "state": 2,
+                "editor_state": 2,
+                "editor_line_number": 507,
+                "is_pending_debug_completion": false,
+                "needs_updated_steps": false,
+                "type": 0,
+                "is_package_breakpoint": false,
+                "package_name": ""
+            }
+        ]
     }
 }

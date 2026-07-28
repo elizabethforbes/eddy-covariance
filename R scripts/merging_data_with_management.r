@@ -41,7 +41,7 @@ ec_daily_mngmnt3 <- ec_daily_mngmnt2 %>%
     crop_stage = case_when(
       management == "organic" &
         date > as.Date("2020-07-08") & # date the barley crop is harvested
-        date < as.Date("2020-10-31") # date the grass mix crop goes into dormancy
+        date < as.Date("2020-10-31") # date the grass mix crop goes into fall hardening
       ~ "vegetative",
       TRUE ~ crop_stage),
     crop_stage_simple = case_when(
